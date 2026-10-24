@@ -1,0 +1,20 @@
+# Local helpers only. Expects Postgres (db `glob`) and Redis already running on the host
+# (see DATABASE_URL / REDIS_URL in .env; use host.docker.internal instead of 127.0.0.1 here).
+# Production lives in vps/.
+
+services:
+  glob-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: glob-api
+    ports:
+      - '3008:3008'
+    env_file:
+      - ./.env
+    volumes:
+      - ./files:/app/files
+      - ./logs:/app/logs
+      - ./tmp:/app/tmp
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
