@@ -20,11 +20,14 @@ export async function sendMail({
     const transport = nodemailer.createTransport({
         host: env.SMTP_HOST,
         port: env.SMTP_PORT,
-        secure: true,
+        secure: env.SMTP_PORT === 465,
         auth: {
             user: env.SMTP_USER,
             pass: env.SMTP_PASSWORD,
         },
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 20_000,
     });
     const result = await transport.sendMail({
         from: env.MAIL_FROM || env.SMTP_USER,

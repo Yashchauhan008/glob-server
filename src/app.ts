@@ -1,7 +1,7 @@
 import express from 'express';
 import morgan from 'morgan';
-import cors from 'cors';
 import Logger from './shared/configs/logger.js';
+import allowBrowserOrigin from './shared/middlewares/allow-browser-origin.js';
 import errorHandler from './shared/middlewares/error-handler.js';
 import appRoute from './app.route.js';
 import RedisClient from './shared/configs/redis.js';
@@ -16,7 +16,7 @@ app.use(
     }),
 );
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(allowBrowserOrigin);
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 

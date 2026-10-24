@@ -14,15 +14,8 @@ export default async function Handler({ io, socket }: SocketContext) {
 
     Logger.info(`User connected: ${userId} (socket: ${socket.id})`);
 
-    const sockets = await io.in(userId).fetchSockets();
-    if (sockets.length === 1) {
-        socket.rooms.forEach((room) => {
-            if (room !== userId) {
-                socket.to(room).emit('user:online', { user_id: userId });
-            }
-        });
-    }
-
+    // Register before any await. The client is already told the socket is up,
+    // and its first presence:route arrives while fetchSockets is still running.
     registerPresence(io, socket);
     registerChat(io, socket);
 
@@ -38,4 +31,14 @@ export default async function Handler({ io, socket }: SocketContext) {
             handler: onUserDisconnectHandler,
         }),
     );
+
+    const sockets = await io.in(userId).fetchSockets();
+    if (sockets.length === 1) {
+        socket.rooms.forEach((room) => {
+            if (room !== userId) {
+                socket.to(room).emit('user:online', { user_id: userId });
+            }
+        });
+    }
+
 }

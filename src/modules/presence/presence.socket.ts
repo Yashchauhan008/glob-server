@@ -32,6 +32,10 @@ export default function registerPresence(io: Server, socket: Socket) {
         await broadcastRoster(io);
     });
 
+    // Ask after the listener exists, so a route sent before this handler was
+    // attached is not the only attempt.
+    socket.emit('presence:hello');
+
     socket.on('presence:cursor', (payload: { x?: number; y?: number }) => {
         const route = socket.data.route as string | undefined;
         const { x, y } = payload || {};

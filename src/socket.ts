@@ -43,7 +43,8 @@ export async function initSocket (server: HttpServer) {
 
     const io = new Server(server, {
         adapter: createAdapter(pubClient, subClient, { key: 'glob' }),
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'],
+        cors: { origin: true, credentials: true },
     });
 
     io.use(validateUserSocketHandShake);

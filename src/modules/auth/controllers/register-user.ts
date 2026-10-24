@@ -45,9 +45,17 @@ export async function Controller(
         code: otp.toString(),
     });
 
-    sendMail({ to: email, subject: 'Email Verification', html: emailHtml }).catch((error) => {
-        Logger.error(error.message);
-    });
+    try {
+        await sendMail({ to: email, subject: 'Email Verification', html: emailHtml });
+    } catch (error) {
+        const mailError = error as { message?: string; response?: string };
+        Logger.error(`Verification email failed: ${mailError.message || 'unknown error'}`, {
+            stack: mailError.response,
+        });
+        return res
+            .status(StatusCodes.INTERNAL_SERVER_ERROR)
+            .json({ message: 'Could not send the verification email. Try again.' });
+    }
 
     return res.status(StatusCodes.OK).json({
         token,

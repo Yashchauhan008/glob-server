@@ -14,4 +14,8 @@ router.route('/upload-multiple').post(fileUpload.array('files'), withDatabase(up
 
 router.use('/', express.static(env.FILE_STORAGE_PATH));
 
+router.use((_req, res) => {
+    res.status(404).json({ code: 'not_found', message: 'Not found' });
+});
+
 export default router;

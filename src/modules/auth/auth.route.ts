@@ -25,4 +25,10 @@ router
 
 router.route('/login').post(validate(loginUserValidationSchema), withDatabase(loginUser));
 
+// Unmatched methods (including a browser GET) must end here. Otherwise they fall
+// through to the global authenticate middleware and come back 401 with no CORS headers.
+router.use((_req, res) => {
+    res.status(404).json({ code: 'not_found', message: 'Not found' });
+});
+
 export default router;
