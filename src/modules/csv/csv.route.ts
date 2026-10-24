@@ -20,7 +20,7 @@ const exports_: Record<string, { sql: string; cols: string[] }> = {
     },
     ideas: { sql: 'SELECT * FROM ideas ORDER BY created_at', cols: ['title', 'description', 'status'] },
     notes: {
-        sql: 'SELECT n.*, i.title AS idea_title FROM idea_notes n JOIN ideas i ON i.id = n.idea_id ORDER BY n.created_at',
+        sql: 'SELECT n.*, n.tag AS kind, i.title AS idea_title FROM idea_messages n JOIN ideas i ON i.id = n.idea_id ORDER BY n.created_at',
         cols: ['idea_title', 'kind', 'body'],
     },
     products: { sql: 'SELECT * FROM products ORDER BY created_at', cols: ['name', 'url', 'status'] },

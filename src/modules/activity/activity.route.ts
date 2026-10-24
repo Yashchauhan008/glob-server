@@ -39,6 +39,7 @@ const TABLES: Record<string, { table: string; col: string; label: string }> = {
 };
 
 const a = (w: string) => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w;
+const MARK: Record<string, string> = { problem: 'raised a problem on', solution: 'proposed a solution on', conclusion: 'marked a conclusion on' };
 const clip = (s: unknown, n = 140) => { const t = String(s ?? '').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 
 async function lookupTitle(seg: string, id: string): Promise<string> {
@@ -60,7 +61,9 @@ function describe(method: string, parts: string[], body: any, out: any, before: 
 
     if (seg === 'ideas' && id) {
         if (method === 'PUT' && sub === 'vote') return { verb: `rated feasibility ${body?.feasibility}/5 on`, type: seg, id, title: before };
-        if (method === 'POST' && sub === 'notes') return { verb: `added a ${body?.kind ?? 'note'} to`, type: seg, id, title: before, detail: clip(body?.body) };
+        if (sub === 'messages' && method === 'POST' && body?.tag) return { verb: MARK[body.tag as string], type: seg, id, title: before, detail: clip(body?.body) };
+        if (sub === 'messages' && method === 'PATCH' && ['problem', 'solution', 'conclusion'].includes(body?.tag)) return { verb: MARK[body.tag as string], type: seg, id, title: before, detail: clip(out?.body) };
+        if (sub === 'messages') return null; // plain conversation is not feed material
     }
     if (seg === 'questions' && id && method === 'POST') {
         if (sub === 'answers') return { verb: 'answered', type: seg, id, title: before, detail: clip(body?.body) };

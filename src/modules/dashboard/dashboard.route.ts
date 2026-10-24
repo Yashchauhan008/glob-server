@@ -8,7 +8,7 @@ router.get('/', withDatabase(async (_req, res, _n, db) => {
         await Promise.all([
             db.queryOne(
                 `SELECT (SELECT count(*) FROM ideas)::int AS ideas,
-                    (SELECT count(*) FROM idea_notes)::int AS notes,
+                    (SELECT count(*) FROM idea_messages)::int AS notes,
                     (SELECT count(*) FROM idea_votes)::int AS votes,
                     (SELECT count(*) FROM questions)::int AS questions,
                     (SELECT count(*) FROM questions WHERE accepted_answer_id IS NULL)::int AS open_questions,
@@ -21,10 +21,10 @@ router.get('/', withDatabase(async (_req, res, _n, db) => {
             ),
             db.queryAll('SELECT status, count(*)::int AS count FROM ideas GROUP BY status'),
             db.queryAll(
-                `SELECT n.id, n.kind, n.body, n.idea_id, i.title AS idea_title FROM idea_notes n
+                `SELECT n.id, n.tag AS kind, n.body, n.idea_id, i.title AS idea_title FROM idea_messages n
                  JOIN ideas i ON i.id = n.idea_id
-                 WHERE n.kind IN ('problem','ask')
-                   AND NOT EXISTS (SELECT 1 FROM idea_notes s WHERE s.parent_id = n.id AND s.kind = 'solution')
+                 WHERE n.tag = 'problem'
+                   AND NOT EXISTS (SELECT 1 FROM idea_messages s WHERE s.parent_id = n.id AND s.tag = 'solution')
                  ORDER BY n.created_at DESC LIMIT 20`,
             ),
             db.queryAll('SELECT id, name, url, status FROM products ORDER BY created_at DESC'),
