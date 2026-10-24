@@ -24,6 +24,8 @@ const router = Router();
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const rows = await db.queryAll(
         `SELECT i.*, u.name AS owner_name,
+            (SELECT count(*)::int FROM attachments a WHERE a.entity_type = 'idea' AND a.entity_id = i.id) AS attachments,
+            (SELECT a.url FROM attachments a WHERE a.entity_type = 'idea' AND a.entity_id = i.id AND a.kind = 'image' ORDER BY a.created_at LIMIT 1) AS cover,
             (SELECT count(*)::int FROM idea_notes n WHERE n.idea_id = i.id AND n.kind = 'problem') AS problems,
             (SELECT count(*)::int FROM idea_notes n WHERE n.idea_id = i.id AND n.kind = 'ask') AS asks,
             (SELECT count(*)::int FROM idea_notes n WHERE n.idea_id = i.id AND n.kind = 'solution') AS solutions,
