@@ -14,6 +14,7 @@ const envSchema = z.object({
 
     // Authentication
     JWT_SECRET: z.string().min(5).max(255),
+    GOOGLE_CLIENT_ID: z.string().optional(),
 
     // Logging
     CONSOLE_LOG_LEVEL: z

@@ -15,6 +15,11 @@ import {
     ValidationSchema as loginUserValidationSchema,
 } from '@/modules/auth/controllers/login-user.js';
 
+import {
+    Controller as googleLogin,
+    ValidationSchema as googleLoginValidationSchema,
+} from '@/modules/auth/controllers/google-login.js';
+
 const router = Router();
 
 router.route('/register').post(validate(registerUserValidationSchema), withDatabase(registerUser));
@@ -24,6 +29,8 @@ router
     .post(validate(verifyRegistrationValidationSchema), withDatabase(verifyRegistration));
 
 router.route('/login').post(validate(loginUserValidationSchema), withDatabase(loginUser));
+
+router.route('/google').post(validate(googleLoginValidationSchema), withDatabase(googleLogin));
 
 // Unmatched methods (including a browser GET) must end here. Otherwise they fall
 // through to the global authenticate middleware and come back 401 with no CORS headers.
