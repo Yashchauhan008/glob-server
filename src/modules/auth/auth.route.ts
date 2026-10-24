@@ -20,7 +20,12 @@ import {
     ValidationSchema as googleLoginValidationSchema,
 } from '@/modules/auth/controllers/google-login.js';
 
+import env from '@/shared/configs/env.js';
+
 const router = Router();
+
+// public runtime config: lets the frontend show Google sign-in without a rebuild
+router.get('/config', (_req, res) => res.json({ google_client_id: env.GOOGLE_CLIENT_ID ?? null }));
 
 router.route('/register').post(validate(registerUserValidationSchema), withDatabase(registerUser));
 
