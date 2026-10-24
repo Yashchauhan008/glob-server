@@ -7,6 +7,7 @@ import { patchRow, notFound } from '@/shared/utilities/crud.js';
 const body = z.object({
     name: z.string().trim().min(1).max(255),
     url: z.string().trim().max(2000).default(''),
+    description: z.string().trim().max(10000).default(''),
     status: z.enum(['up', 'down', 'building']).default('building'),
     idea_id: z.string().uuid().nullish(),
 });
@@ -27,8 +28,8 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(body, req.body);
     res.status(201).json(
         await db.queryOne(
-            'INSERT INTO products (owner_id, name, url, status, idea_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-            [req.user!.id, b.name, b.url, b.status, b.idea_id ?? null],
+            'INSERT INTO products (owner_id, name, url, description, status, idea_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+            [req.user!.id, b.name, b.url, b.description, b.status, b.idea_id ?? null],
         ),
     );
 }));
