@@ -1,8 +1,5 @@
 import Database from '@/shared/helpers/database.helper.js';
-import { getAllFileKeys } from '@/shared/utilities/file.js';
-import path from 'path';
-import env from '@/shared/configs/env.js';
-import fsp from 'fs/promises';
+import { deleteFile, getAllFileKeys } from '@/shared/utilities/file.js';
 import Logger from '@/shared/configs/logger.js';
 
 export async function task() {
@@ -13,7 +10,7 @@ export async function task() {
 
     for (const file of storageFiles) {
         if (!dbFilesKeys.includes(file)) {
-            await fsp.unlink(path.join(env.FILE_STORAGE_PATH, file));
+            await deleteFile(file);
             Logger.info(`Deleted file: ${file}`);
         }
     }

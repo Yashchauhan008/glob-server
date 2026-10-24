@@ -46,6 +46,9 @@ const envSchema = z.object({
     AWS_ACCESS_KEY_ID: z.string(),
     AWS_SECRET_ACCESS_KEY: z.string(),
     AWS_S3_BACKUP_BUCKET: z.string(),
+    // uploaded files go here when set; otherwise they stay on local disk (FILE_STORAGE_PATH)
+    AWS_S3_MEDIA_BUCKET: z.string().optional(),
+    AWS_S3_PREFIX: z.string().default('glob/'),
 });
 
 const { data: env, error } = envSchema.safeParse(process.env);
