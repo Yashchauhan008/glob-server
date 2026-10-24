@@ -12,6 +12,7 @@ import csvRoutes from '@/modules/csv/csv.route.js';
 
 import eventRoutes from '@/modules/events/events.route.js';
 import chatRoutes from '@/modules/chat/chat.route.js';
+import activityRoutes, { activityLogger } from '@/modules/activity/activity.route.js';
 import qaRoutes from '@/modules/qa/qa.route.js';
 
 const router = Router();
@@ -20,6 +21,7 @@ router.use('/auth', authRoutes);
 router.use('/files', fileRoutes);
 
 router.use(authenticate);
+router.use(activityLogger);
 router.get('/me', (req, res) => res.json({ user: req.user }));
 router.use('/ideas', ideaRoutes);
 router.use('/products', productRoutes);
@@ -30,5 +32,6 @@ router.use('/csv', csvRoutes);
 router.use('/events', eventRoutes);
 router.use('/chat', chatRoutes);
 router.use('/questions', qaRoutes);
+router.use('/activity', activityRoutes);
 
 export default router;
