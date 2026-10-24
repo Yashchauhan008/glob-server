@@ -3,6 +3,7 @@ import type { DatabaseClient } from '@/shared/helpers/database.helper.js';
 import { STATUS_CODES } from '@/shared/constants/status-codes.js';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
+import { logAuth } from '@/modules/activity/activity.route.js';
 import bcrypt from 'bcryptjs';
 import { createJWTToken } from '@/shared/utilities/token.js';
 
@@ -35,6 +36,8 @@ export async function Controller(
         { type: TOKEN_TYPES.USER_ACCESS_TOKEN, user_id: user.id },
         '24h',
     );
+
+    await logAuth(db, user.id, 'logged in');
 
     return res.status(STATUS_CODES.OK).json({
         token: accessToken,

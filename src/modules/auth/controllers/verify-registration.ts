@@ -4,6 +4,7 @@ import { STATUS_CODES as StatusCodes } from '@/shared/constants/status-codes.js'
 import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
 import RedisClient from '@/shared/configs/redis.js';
+import { logAuth } from '@/modules/activity/activity.route.js';
 import { createJWTToken, decryptEncryptedToken } from '@/shared/utilities/token.js';
 import bcrypt from 'bcryptjs';
 
@@ -49,6 +50,8 @@ export async function Controller(
         `,
         [name, email, passwordHash],
     );
+
+    await logAuth(db, newUser.id, 'joined Glob');
 
     const accessToken = await createJWTToken(
         { type: TOKEN_TYPES.USER_ACCESS_TOKEN, user_id: newUser.id },

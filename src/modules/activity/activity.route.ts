@@ -20,6 +20,11 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
 
 export default router;
 
+/** Record an auth event (login / sign-up) for the activity feed. Never blocks or fails the request. */
+export function logAuth(db: { query: (sql: string, params?: any[]) => Promise<unknown> }, userId: string, verb: string) {
+    return db.query("INSERT INTO activities (actor_id, verb, entity_type, title) VALUES ($1,$2,'auth','')", [userId, verb]).catch(() => {});
+}
+
 // ---- automatic logging of successful writes ----
 
 type Entry = { verb: string; type: string; id: string | null; title: string; detail?: string | null };

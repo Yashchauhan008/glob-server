@@ -3,6 +3,7 @@ import type { DatabaseClient } from '@/shared/helpers/database.helper.js';
 import { STATUS_CODES } from '@/shared/constants/status-codes.js';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
+import { logAuth } from '@/modules/activity/activity.route.js';
 import env from '@/shared/configs/env.js';
 import { createJWTToken } from '@/shared/utilities/token.js';
 
@@ -44,12 +45,15 @@ export async function Controller(
 
     const email = profile.email.toLowerCase();
     // an existing account with this email just signs in; otherwise one is created (no password)
+    const existing = await db.queryOne('SELECT id, name, email FROM users WHERE email = $1', [email]);
     const user =
-        (await db.queryOne('SELECT id, name, email FROM users WHERE email = $1', [email])) ??
+        existing ??
         (await db.queryOne(
             "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, '') RETURNING id, name, email",
             [profile.name || email.split('@')[0], email],
         ));
+
+    await logAuth(db, user.id, existing ? 'logged in with Google' : 'joined Glob with Google');
 
     const token = await createJWTToken({ type: TOKEN_TYPES.USER_ACCESS_TOKEN, user_id: user.id }, '24h');
 
