@@ -13,6 +13,7 @@ import csvRoutes from '@/modules/csv/csv.route.js';
 import eventRoutes from '@/modules/events/events.route.js';
 import chatRoutes from '@/modules/chat/chat.route.js';
 import attachmentRoutes from '@/modules/attachments/attachments.route.js';
+import alertRoutes from '@/modules/alerts/alerts.route.js';
 import activityRoutes, { activityLogger } from '@/modules/activity/activity.route.js';
 import qaRoutes from '@/modules/qa/qa.route.js';
 
@@ -34,6 +35,7 @@ router.use('/events', eventRoutes);
 router.use('/chat', chatRoutes);
 router.use('/questions', qaRoutes);
 router.use('/activity', activityRoutes);
+router.use('/alerts', alertRoutes);
 router.use('/attachments', attachmentRoutes);
 
 export default router;
