@@ -19,17 +19,21 @@ const router = Router();
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const filter = String(req.query.filter || 'all');
-    const where = filter === 'open' ? 'WHERE t.done = false' : filter === 'done' ? 'WHERE t.done = true' : '';
+    const ideaId = typeof req.query.idea_id === 'string' && /^[0-9a-f-]{36}$/i.test(req.query.idea_id) ? req.query.idea_id : null;
+    const conds = [filter === 'open' ? 't.done = false' : filter === 'done' ? 't.done = true' : '', ideaId ? 't.idea_id = $1' : ''].filter(Boolean);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
     const items = await db.queryAll(
-        `SELECT t.*, i.title AS idea_title, p.name AS product_name, l.name AS lead_name
+        `SELECT t.*, u.name AS owner_name, i.title AS idea_title, p.name AS product_name, l.name AS lead_name
          FROM todos t
+         LEFT JOIN users u ON u.id = t.owner_id
          LEFT JOIN ideas i ON i.id = t.idea_id
          LEFT JOIN products p ON p.id = t.product_id
          LEFT JOIN leads l ON l.id = t.lead_id
          ${where} ORDER BY t.done, t.due_date NULLS LAST, t.created_at DESC`,
+        ideaId ? [ideaId] : [],
     );
     // lead follow-ups surface here too (read-only virtual items)
-    const followUps = filter === 'done' ? [] : await db.queryAll(
+    const followUps = filter === 'done' || ideaId ? [] : await db.queryAll(
         `SELECT id AS lead_id, name AS lead_name, next_follow_up_at
          FROM leads WHERE next_follow_up_at IS NOT NULL AND stage NOT IN ('won','lost')
          ORDER BY next_follow_up_at`,
