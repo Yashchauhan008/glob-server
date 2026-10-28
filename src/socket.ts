@@ -45,6 +45,7 @@ export async function initSocket (server: HttpServer) {
         adapter: createAdapter(pubClient, subClient, { key: 'glob' }),
         transports: ['websocket', 'polling'],
         cors: { origin: true, credentials: true },
+        maxHttpBufferSize: 8e6, // whiteboard edits (freehand strokes) can be large
     });
 
     io.use(validateUserSocketHandShake);

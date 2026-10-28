@@ -4,6 +4,7 @@ import type { Context as SocketContext } from '@/shared/utilities/socket-handler
 import registerSocketEventHandler from '@/shared/utilities/socket-handler.js';
 import registerChat from '@/modules/chat/chat.socket.js';
 import registerPresence from '@/modules/presence/presence.socket.js';
+import registerBoards from '@/modules/boards/boards.socket.js';
 import { Handler as onUserDisconnectHandler } from '@/modules/user/handlers/socket/on-user-disconnect.js';
 
 export default async function Handler({ io, socket }: SocketContext) {
@@ -18,6 +19,7 @@ export default async function Handler({ io, socket }: SocketContext) {
     // and its first presence:route arrives while fetchSockets is still running.
     registerPresence(io, socket);
     registerChat(io, socket);
+    registerBoards(io, socket);
 
     socket.on('ping', (message: string) => {
         socket.emit('pong', message);
