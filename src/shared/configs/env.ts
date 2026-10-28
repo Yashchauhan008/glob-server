@@ -17,6 +17,8 @@ const envSchema = z.object({
     GOOGLE_CLIENT_ID: z.string().optional(),
     // the one person who decides who may sign in (invites, block, remove). Always allowed in.
     ROOT_EMAIL: z.string().trim().toLowerCase().optional(),
+    // where the "Join the team" button in invite emails points
+    APP_URL: z.string().url().default('https://glob.yashchauhan.pro'),
 
     // Logging
     CONSOLE_LOG_LEVEL: z

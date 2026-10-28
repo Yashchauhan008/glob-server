@@ -8,6 +8,9 @@ import { hardDeleteFile, registerNewFile } from '@/modules/file/file.service.js'
 import Database from '@/shared/helpers/database.helper.js';
 import { ROOT_EMAIL, isRoot, isRootEmail } from '@/modules/access/access.service.js';
 import { kickUser } from '@/modules/access/access.kick.js';
+import env from '@/shared/configs/env.js';
+import Logger from '@/shared/configs/logger.js';
+import { renderEmailTemplates, sendMail } from '@/shared/utilities/mail.js';
 
 const router = Router();
 
@@ -62,13 +65,31 @@ router.post('/invites', rootOnly, withDatabase(async (req, res, _n, db) => {
     const valid = wanted.filter((e) => z.email().safeParse(e).success);
     const invalid = wanted.filter((e) => !valid.includes(e));
     if (!valid.length) return res.status(400).json({ message: invalid.length ? `Not a valid email: ${invalid.join(', ')}` : 'Type at least one email' });
-    let added = 0;
+    const fresh: string[] = [];
     for (const email of valid) {
         const r = await db.query('INSERT INTO allowed_emails (email, added_by) VALUES ($1, $2) ON CONFLICT DO NOTHING', [email as string, req.user!.id as string]);
-        added += r.rowCount ?? 0;
+        if (r.rowCount) fresh.push(email as string);
     }
+    const added = fresh.length;
     res.status(201).json({ added, already: valid.length - added, invalid });
+
+    // a warm welcome to each newly invited person; sent after replying so a slow mail server never holds up the page
+    if (fresh.length) {
+        const inviter = await db.queryOne('SELECT name FROM users WHERE id = $1', [req.user!.id]);
+        void sendInvites(fresh, (inviter?.name as string | undefined) ?? '');
+    }
 }));
+
+async function sendInvites(emails: string[], invitedBy: string) {
+    for (const email of emails) {
+        try {
+            const html = await renderEmailTemplates('invite', { email, invitedBy, appUrl: env.APP_URL });
+            await sendMail({ to: email, subject: invitedBy ? `${invitedBy} invited you to Glob` : 'You are invited to Glob', html });
+        } catch (e) {
+            Logger.error(`Invite email to ${email} failed: ${(e as Error).message}`);
+        }
+    }
+}
 
 router.delete('/invites/:email', rootOnly, withDatabase(async (req, res, _n, db) => {
     const email = decodeURIComponent(String(req.params.email)).trim().toLowerCase();
