@@ -3,6 +3,7 @@ import { decodeJWTToken } from '@/shared/utilities/token.js';
 import Database from '@/shared/helpers/database.helper.js';
 import { Socket } from 'socket.io';
 import { TOKEN_TYPES } from '../auth.constant.js';
+import { accessFor } from '@/modules/access/access.service.js';
 
 export default async function validateUserSocketHandShake(
     socket: Socket,
@@ -25,6 +26,8 @@ export default async function validateUserSocketHandShake(
             payload.user_id as string,
         ]);
         if (!user) throw new ServerError('UNAUTHORIZED', 'invalid token');
+
+        if (!(await accessFor(user.id)).ok) throw new ServerError('UNAUTHORIZED', 'access removed');
 
         socket.data.user = { id: user.id, name: user.name };
         socket.join(user.id);

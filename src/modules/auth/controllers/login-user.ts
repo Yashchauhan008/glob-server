@@ -6,6 +6,7 @@ import z from 'zod';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import bcrypt from 'bcryptjs';
 import { createJWTToken } from '@/shared/utilities/token.js';
+import { DENIED, emailAllowed, isRootEmail } from '@/modules/access/access.service.js';
 
 export const ValidationSchema = {
     body: z.object({
@@ -31,6 +32,12 @@ export async function Controller(
 
     if (!isPasswordValid)
         return res.status(STATUS_CODES.BAD_REQUEST).json({ message: 'Invalid email or password' });
+
+    // checked after the password so this cannot be used to find out which emails exist
+    if (!isRootEmail(user.email)) {
+        if (user.blocked_at) return res.status(STATUS_CODES.FORBIDDEN).json({ message: DENIED.blocked });
+        if (!(await emailAllowed(user.email))) return res.status(STATUS_CODES.FORBIDDEN).json({ message: DENIED.notInvited });
+    }
 
     const accessToken = await createJWTToken(
         { type: TOKEN_TYPES.USER_ACCESS_TOKEN, user_id: user.id },

@@ -6,6 +6,7 @@ import z from 'zod';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import env from '@/shared/configs/env.js';
 import { createJWTToken } from '@/shared/utilities/token.js';
+import { DENIED, emailAllowed, isRootEmail } from '@/modules/access/access.service.js';
 
 export const ValidationSchema = {
     body: z.object({
@@ -45,7 +46,11 @@ export async function Controller(
 
     const email = profile.email.toLowerCase();
     // an existing account with this email just signs in; otherwise one is created (no password)
-    const existing = await db.queryOne('SELECT id, name, email FROM users WHERE email = $1', [email]);
+    const existing = await db.queryOne('SELECT id, name, email, avatar_url, blocked_at FROM users WHERE email = $1', [email]);
+    if (!isRootEmail(email)) {
+        if (existing?.blocked_at) return res.status(STATUS_CODES.FORBIDDEN).json({ message: DENIED.blocked });
+        if (!(await emailAllowed(email))) return res.status(STATUS_CODES.FORBIDDEN).json({ message: DENIED.notInvited });
+    }
     const user =
         existing ??
         (await db.queryOne(

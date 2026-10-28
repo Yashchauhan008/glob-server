@@ -7,6 +7,7 @@ import RedisClient from '@/shared/configs/redis.js';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import { createJWTToken, decryptEncryptedToken } from '@/shared/utilities/token.js';
 import bcrypt from 'bcryptjs';
+import { DENIED, emailAllowed } from '@/modules/access/access.service.js';
 
 export const ValidationSchema = {
     body: z.object({
@@ -39,6 +40,9 @@ export async function Controller(
         email: string;
         password: string;
     };
+
+    // the invite may have been withdrawn since the code was sent
+    if (!(await emailAllowed(email))) return res.status(StatusCodes.FORBIDDEN).json({ message: DENIED.notInvited });
 
     const passwordHash = await bcrypt.hash(password, 10);
 

@@ -15,6 +15,8 @@ const envSchema = z.object({
     // Authentication
     JWT_SECRET: z.string().min(5).max(255),
     GOOGLE_CLIENT_ID: z.string().optional(),
+    // the one person who decides who may sign in (invites, block, remove). Always allowed in.
+    ROOT_EMAIL: z.string().trim().toLowerCase().optional(),
 
     // Logging
     CONSOLE_LOG_LEVEL: z

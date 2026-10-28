@@ -7,6 +7,7 @@ import z from 'zod';
 import { sendMail, renderEmailTemplates } from '@/shared/utilities/mail.js';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import Logger from '@/shared/configs/logger.js';
+import { DENIED, emailAllowed } from '@/modules/access/access.service.js';
 
 export const ValidationSchema = {
     body: z.object({
@@ -23,6 +24,8 @@ export async function Controller(
     db: DatabaseClient,
 ) {
     const { name, email, password } = req.body as z.infer<typeof ValidationSchema.body>;
+
+    if (!(await emailAllowed(email))) return res.status(StatusCodes.FORBIDDEN).json({ message: DENIED.notInvited });
 
     const user = await db.queryOne('SELECT id FROM users WHERE email = $1', [email]);
     if (user) return res.status(StatusCodes.CONFLICT).json({ message: 'User already exists' });
