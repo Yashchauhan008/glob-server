@@ -13,7 +13,8 @@ const body = z.object({
     product_id: z.string().uuid().nullish(),
     lead_id: z.string().uuid().nullish(),
 });
-const patch = body.partial();
+// an update only changes what it sends (the create form's `done: false` default must not apply here, or editing a title would re-open the task)
+const patch = body.extend({ done: z.boolean().optional() }).partial();
 
 const router = Router();
 
@@ -45,8 +46,8 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(body, req.body);
     res.status(201).json(
         await db.queryOne(
-            `INSERT INTO todos (owner_id, title, done, due_date, idea_id, note_id, product_id, lead_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+            `INSERT INTO todos (owner_id, title, done, due_date, idea_id, note_id, product_id, lead_id, completed_by, completed_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8, CASE WHEN $3 THEN $1::uuid END, CASE WHEN $3 THEN now() END) RETURNING *`,
             [req.user!.id, b.title, b.done, b.due_date ?? null, b.idea_id ?? null, b.note_id ?? null,
              b.product_id ?? null, b.lead_id ?? null],
         ),
@@ -54,8 +55,17 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
 }));
 
 router.patch('/:id', withDatabase(async (req, res, _n, db) => {
-    const row = await patchRow(db, 'todos', req.params.id as string, validate(patch, req.body));
+    const data = validate(patch, req.body);
+    const before = await db.queryOne('SELECT done FROM todos WHERE id = $1', [req.params.id as string]);
+    let row = await patchRow(db, 'todos', req.params.id as string, data);
     if (!row) return notFound(res);
+    // credit goes to whoever ticks it off (not to whoever wrote the task); un-ticking takes the credit back
+    if (typeof data.done === 'boolean' && before && data.done !== before.done) {
+        row = await db.queryOne(
+            'UPDATE todos SET completed_by = CASE WHEN $2::boolean THEN $3::uuid END, completed_at = CASE WHEN $2::boolean THEN now() END WHERE id = $1 RETURNING *',
+            [req.params.id as string, data.done, req.user!.id],
+        );
+    }
     res.json(row);
 }));
 

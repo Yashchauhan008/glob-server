@@ -1,3 +1,4 @@
+import { unlink } from 'fs/promises';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
@@ -21,7 +22,8 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
         `SELECT u.id, u.name, u.email, u.avatar_url, u.created_at, u.blocked_at,
                 EXISTS (SELECT 1 FROM allowed_emails a WHERE a.email = lower(u.email)) AS invited,
                 (SELECT count(*)::int FROM ideas i WHERE i.owner_id = u.id) AS ideas,
-                (SELECT count(*)::int FROM todos t WHERE t.owner_id = u.id AND t.done) AS tasks_done,
+                (SELECT count(*)::int FROM todos t WHERE t.completed_by = u.id AND t.done) AS tasks_done,
+                u.live_seconds::float8 AS live_seconds,
                 (SELECT max(a.created_at) FROM activities a WHERE a.actor_id = u.id) AS last_active
          FROM users u ORDER BY lower(u.name)`,
     );
@@ -160,28 +162,40 @@ async function dropOldAvatar(db: Parameters<Parameters<typeof withDatabase>[0]>[
     if (file) await hardDeleteFile(db, { id: file.id as string });
 }
 
-/** You can only change your own profile. */
-router.patch('/me', withDatabase(async (req, res, _n, db) => {
-    const b = validate(profile, req.body);
+/** Who is being edited: yourself ("me"), or - for the admin only - anyone. */
+async function editableId(req: Request, res: Response): Promise<string | null> {
     const me = req.user!.id;
-    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [me]);
+    const raw = req.params.id;
+    const id = raw === undefined || raw === 'me' ? me : validate(z.string().uuid(), raw);
+    if (id !== me && !(await isRoot(me))) { res.status(403).json({ message: 'Only the admin can edit other people' }); return null; }
+    if (!(await Database.queryOne('SELECT 1 AS ok FROM users WHERE id = $1', [id]))) { res.status(404).json({ message: 'Member not found' }); return null; }
+    return id;
+}
+
+/** Change a name, or remove a picture. Yourself, or anyone if you are the admin. */
+router.patch(['/me', '/:id'], withDatabase(async (req, res, _n, db) => {
+    const b = validate(profile, req.body);
+    const id = await editableId(req, res);
+    if (!id) return;
+    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [id]);
     const row = await db.queryOne(
         `UPDATE users SET name = COALESCE($2, name),
             avatar_url = CASE WHEN $3::boolean THEN NULL ELSE avatar_url END, updated_at = now()
          WHERE id = $1 RETURNING ${publicUser}`,
-        [me, b.name ?? null, b.remove_avatar === true],
+        [id, b.name ?? null, b.remove_avatar === true],
     );
     if (b.remove_avatar) await dropOldAvatar(db, before?.avatar_url as string | null);
     res.json(row);
 }));
 
 /** Upload a new picture: cropped to a small square and compressed to half the size, then stored in S3. */
-router.post('/me/avatar', imageUpload.single('file'), withDatabase(async (req, res, _n, db) => {
+router.post(['/me/avatar', '/:id/avatar'], imageUpload.single('file'), withDatabase(async (req, res, _n, db) => {
     if (!req.file) return res.status(400).json({ message: 'Choose a picture' });
-    const me = req.user!.id;
-    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [me]);
+    const id = await editableId(req, res);
+    if (!id) { void unlink(req.file.path).catch(() => {}); return; }
+    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [id]);
     const file = await registerNewFile(db, { filePath: req.file.path, _status: 'saved', compress: 'avatar' });
-    const row = await db.queryOne(`UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING ${publicUser}`, [me, file.url]);
+    const row = await db.queryOne(`UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING ${publicUser}`, [id, file.url]);
     await dropOldAvatar(db, before?.avatar_url as string | null);
     res.json(row);
 }));

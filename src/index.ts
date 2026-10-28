@@ -5,6 +5,7 @@ import Logger from './shared/configs/logger.js';
 import Socket from '@/socket.js';
 import { initializeJobs } from './jobs.js';
 import { flushAll } from '@/modules/boards/board.store.js';
+import { startLiveTimeCounter } from '@/modules/presence/live-time.js';
 
 const server = http.createServer(app);
 
@@ -15,6 +16,7 @@ server.listen(env.PORT, () => {
 });
 
 initializeJobs();
+startLiveTimeCounter();
 
 // a deploy restarts the container: save whiteboard edits that are still waiting in memory first
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
