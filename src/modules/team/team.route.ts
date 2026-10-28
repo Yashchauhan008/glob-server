@@ -2,6 +2,8 @@ import { Router } from 'express';
 import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
 import { validate } from '@/shared/helpers/validation.helper.js';
+import { upload as imageUpload } from '@/shared/middlewares/multer/image-upload.js';
+import { hardDeleteFile, registerNewFile } from '@/modules/file/file.service.js';
 
 const router = Router();
 
@@ -19,31 +21,41 @@ router.get('/', withDatabase(async (_req, res, _n, db) => {
 
 const profile = z.object({
     name: z.string().trim().min(1, 'Name cannot be empty').max(80).optional(),
-    // upload the picture first (POST /attachments/upload), then send its file id; null removes it
-    avatar_file_id: z.string().uuid().nullable().optional(),
+    remove_avatar: z.boolean().optional(),
 });
+
+const publicUser = 'id, name, email, avatar_url';
+
+/** The stored copy of someone's old picture, so replacing or removing it does not leave files behind in S3. */
+async function dropOldAvatar(db: Parameters<Parameters<typeof withDatabase>[0]>[3], url: string | null) {
+    if (!url) return;
+    const file = await db.queryOne('SELECT id FROM files WHERE url = $1', [url]);
+    if (file) await hardDeleteFile(db, { id: file.id as string });
+}
 
 /** You can only change your own profile. */
 router.patch('/me', withDatabase(async (req, res, _n, db) => {
     const b = validate(profile, req.body);
     const me = req.user!.id;
-
-    let avatarUrl: string | null | undefined;
-    if (b.avatar_file_id === null) avatarUrl = null;
-    else if (b.avatar_file_id) {
-        const file = await db.queryOne('SELECT url FROM files WHERE id = $1', [b.avatar_file_id]);
-        if (!file) return res.status(400).json({ message: 'Upload the picture first' });
-        avatarUrl = file.url as string;
-    }
-
+    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [me]);
     const row = await db.queryOne(
-        `UPDATE users SET
-            name = COALESCE($2, name),
-            avatar_url = CASE WHEN $3::boolean THEN $4 ELSE avatar_url END,
-            updated_at = now()
-         WHERE id = $1 RETURNING id, name, email, avatar_url`,
-        [me, b.name ?? null, avatarUrl !== undefined, avatarUrl ?? null],
+        `UPDATE users SET name = COALESCE($2, name),
+            avatar_url = CASE WHEN $3::boolean THEN NULL ELSE avatar_url END, updated_at = now()
+         WHERE id = $1 RETURNING ${publicUser}`,
+        [me, b.name ?? null, b.remove_avatar === true],
     );
+    if (b.remove_avatar) await dropOldAvatar(db, before?.avatar_url as string | null);
+    res.json(row);
+}));
+
+/** Upload a new picture: cropped to a small square and compressed to half the size, then stored in S3. */
+router.post('/me/avatar', imageUpload.single('file'), withDatabase(async (req, res, _n, db) => {
+    if (!req.file) return res.status(400).json({ message: 'Choose a picture' });
+    const me = req.user!.id;
+    const before = await db.queryOne('SELECT avatar_url FROM users WHERE id = $1', [me]);
+    const file = await registerNewFile(db, { filePath: req.file.path, _status: 'saved', compress: 'avatar' });
+    const row = await db.queryOne(`UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING ${publicUser}`, [me, file.url]);
+    await dropOldAvatar(db, before?.avatar_url as string | null);
     res.json(row);
 }));
 

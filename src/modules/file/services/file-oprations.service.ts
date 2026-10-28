@@ -2,13 +2,15 @@ import ServerError from '@/shared/utilities/server-error.class.js';
 import { upload, deleteFile as deleteFileFromStorage } from '@/shared/utilities/file.js';
 import Event from '@/shared/configs/server-event.js';
 import env from '@/shared/configs/env.js';
+import { compressImage, type CompressMode } from '@/shared/utilities/image-compress.js';
 import type { DatabaseClient } from '@/shared/helpers/database.helper.js';
 
 export async function registerNewFile(
     db: DatabaseClient,
-    { filePath, _status = 'pending' }: { filePath: string; _status?: string },
+    { filePath, _status = 'pending', compress = 'image' }: { filePath: string; _status?: string; compress?: CompressMode },
 ) {
-    const key = await upload(filePath);
+    // every image is shrunk on the way in (avatars to 50%, anything else to 20% of the original)
+    const key = await upload(await compressImage(filePath, compress));
     const file = await db.queryOne(
         'INSERT INTO files (key, _status, endpoint) VALUES ($1, $2, $3) RETURNING *',
         [key, _status, env.FILE_STORAGE_ENDPOINT],
