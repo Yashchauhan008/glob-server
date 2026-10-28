@@ -16,6 +16,7 @@ import attachmentRoutes from '@/modules/attachments/attachments.route.js';
 import alertRoutes from '@/modules/alerts/alerts.route.js';
 import activityRoutes, { activityLogger } from '@/modules/activity/activity.route.js';
 import qaRoutes from '@/modules/qa/qa.route.js';
+import voiceRoutes from '@/modules/voice/voice.route.js';
 
 const router = Router();
 
@@ -37,5 +38,6 @@ router.use('/questions', qaRoutes);
 router.use('/activity', activityRoutes);
 router.use('/alerts', alertRoutes);
 router.use('/attachments', attachmentRoutes);
+router.use('/voice', voiceRoutes);
 
 export default router;

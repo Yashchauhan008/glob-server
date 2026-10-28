@@ -34,6 +34,11 @@ const envSchema = z.object({
     // Redis
     REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
+    // Voice / video (LiveKit)
+    LIVEKIT_URL: z.string().optional(),
+    LIVEKIT_API_KEY: z.string().optional(),
+    LIVEKIT_API_SECRET: z.string().optional(),
+
     // SMTP
     SMTP_HOST: z.string(),
     SMTP_PORT: z.coerce.number().int().positive().max(65535),
