@@ -59,6 +59,6 @@ export async function Controller(
 
     return res.status(STATUS_CODES.OK).json({
         token,
-        user: { id: user.id, name: user.name, email: user.email },
+        user: { id: user.id, name: user.name, email: user.email, avatar_url: user.avatar_url ?? null },
     });
 }

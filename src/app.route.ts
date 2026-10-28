@@ -17,6 +17,7 @@ import alertRoutes from '@/modules/alerts/alerts.route.js';
 import activityRoutes, { activityLogger } from '@/modules/activity/activity.route.js';
 import qaRoutes from '@/modules/qa/qa.route.js';
 import voiceRoutes from '@/modules/voice/voice.route.js';
+import teamRoutes from '@/modules/team/team.route.js';
 
 const router = Router();
 
@@ -39,5 +40,6 @@ router.use('/activity', activityRoutes);
 router.use('/alerts', alertRoutes);
 router.use('/attachments', attachmentRoutes);
 router.use('/voice', voiceRoutes);
+router.use('/team', teamRoutes);
 
 export default router;
