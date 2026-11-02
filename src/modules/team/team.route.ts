@@ -11,6 +11,7 @@ import { kickUser } from '@/modules/access/access.kick.js';
 import env from '@/shared/configs/env.js';
 import Logger from '@/shared/configs/logger.js';
 import { renderEmailTemplates, sendMail } from '@/shared/utilities/mail.js';
+import SocketService from '@/socket.js';
 
 const router = Router();
 
@@ -76,7 +77,9 @@ router.post('/invites', rootOnly, withDatabase(async (req, res, _n, db) => {
     // a warm welcome to each newly invited person; sent after replying so a slow mail server never holds up the page
     if (fresh.length) {
         const inviter = await db.queryOne('SELECT name FROM users WHERE id = $1', [req.user!.id]);
-        void sendInvites(fresh, (inviter?.name as string | undefined) ?? '');
+        const invitedBy = (inviter?.name as string | undefined) ?? '';
+        SocketService.io?.emit('team:invited', { emails: fresh, invitedBy, invitedById: req.user!.id });
+        void sendInvites(fresh, invitedBy);
     }
 }));
 
