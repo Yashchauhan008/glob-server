@@ -79,9 +79,31 @@ router.post('/invites', rootOnly, withDatabase(async (req, res, _n, db) => {
         const inviter = await db.queryOne('SELECT name FROM users WHERE id = $1', [req.user!.id]);
         const invitedBy = (inviter?.name as string | undefined) ?? '';
         SocketService.io?.emit('team:invited', { emails: fresh, invitedBy, invitedById: req.user!.id });
+        void holdInviteNotices(fresh, invitedBy);
         void sendInvites(fresh, invitedBy);
     }
 }));
+
+/** The invited person may be offline. Keep the popup until they next open Glob, or send it now if they are here. */
+async function holdInviteNotices(emails: string[], invitedBy: string) {
+    const io = SocketService.io;
+    const title = invitedBy ? `${invitedBy} invited you` : 'You are invited to Glob';
+    for (const email of emails) {
+        const body = 'Open Glob to join the team';
+        const tag = `glob-invite-${email}`;
+        const user = await Database.queryOne('SELECT id FROM users WHERE lower(email) = $1', [email]);
+        const userId = user?.id as string | undefined;
+        const sockets = userId && io ? await io.in(userId).fetchSockets() : [];
+        if (sockets.length && io && userId) {
+            io.to(userId).emit('notice', { title, body, tag });
+            continue;
+        }
+        await Database.query(
+            'INSERT INTO notices (user_id, email, title, body, tag) VALUES ($1, $2, $3, $4, $5)',
+            [userId ?? null, email, title, body, tag],
+        );
+    }
+}
 
 async function sendInvites(emails: string[], invitedBy: string) {
     for (const email of emails) {
