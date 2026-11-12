@@ -5,6 +5,7 @@ import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import { claimInvites } from '@/modules/teams/team.service.js';
+import { recordLogin } from '@/modules/auth/login-track.js';
 import env from '@/shared/configs/env.js';
 import { createJWTToken } from '@/shared/utilities/token.js';
 import { DENIED, emailAllowed, isRootEmail } from '@/modules/access/access.service.js';
@@ -60,6 +61,7 @@ export async function Controller(
         ));
 
     await claimInvites(db, user.id, user.email);
+    await recordLogin(db, user.id);
     await logAuth(db, user.id, existing ? 'logged in with Google' : 'joined Glob with Google');
 
     const token = await createJWTToken({ type: TOKEN_TYPES.USER_ACCESS_TOKEN, user_id: user.id }, '24h');

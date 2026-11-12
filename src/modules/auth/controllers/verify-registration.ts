@@ -6,6 +6,7 @@ import z from 'zod';
 import RedisClient from '@/shared/configs/redis.js';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import { claimInvites } from '@/modules/teams/team.service.js';
+import { recordLogin } from '@/modules/auth/login-track.js';
 import { createJWTToken, decryptEncryptedToken } from '@/shared/utilities/token.js';
 import bcrypt from 'bcryptjs';
 import { DENIED, emailAllowed } from '@/modules/access/access.service.js';
@@ -57,6 +58,7 @@ export async function Controller(
     );
 
     await claimInvites(db, newUser.id, newUser.email);
+    await recordLogin(db, newUser.id);
     await logAuth(db, newUser.id, 'joined Glob');
 
     const accessToken = await createJWTToken(

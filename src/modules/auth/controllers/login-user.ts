@@ -5,6 +5,7 @@ import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
 import { logAuth } from '@/modules/activity/activity.route.js';
 import { claimInvites } from '@/modules/teams/team.service.js';
+import { recordLogin } from '@/modules/auth/login-track.js';
 import bcrypt from 'bcryptjs';
 import { createJWTToken } from '@/shared/utilities/token.js';
 import { DENIED, emailAllowed, isRootEmail } from '@/modules/access/access.service.js';
@@ -46,6 +47,7 @@ export async function Controller(
     );
 
     await claimInvites(db, user.id, user.email);
+    await recordLogin(db, user.id);
     await logAuth(db, user.id, 'logged in');
 
     return res.status(STATUS_CODES.OK).json({
