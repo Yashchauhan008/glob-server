@@ -6,9 +6,11 @@ import { notFound } from '@/shared/utilities/crud.js';
 import { upload as imageUpload } from '@/shared/middlewares/multer/image-upload.js';
 import { hardDeleteFile, registerNewFile } from '@/modules/file/file.service.js';
 import SocketService from '@/socket.js';
+import { foreignLink, inTeam, linksInTeam } from '@/modules/teams/team.scope.js';
 import { forget, getState, setImage, type ImageRef } from './board.store.js';
 
 const router = Router();
+router.param('id', inTeam('boards'));
 const uuid = z.string().uuid();
 
 const LIST = `SELECT b.id, b.title, b.idea_id, i.title AS idea_title, b.owner_id, u.name AS owner_name, b.thumb_url, b.created_at, b.updated_at,
@@ -17,7 +19,7 @@ const LIST = `SELECT b.id, b.title, b.idea_id, i.title AS idea_title, b.owner_id
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const ideaId = typeof req.query.idea_id === 'string' ? validate(uuid, req.query.idea_id) : null;
-    const items = await db.queryAll(`${LIST} WHERE ($1::uuid IS NULL OR b.idea_id = $1) ORDER BY b.updated_at DESC`, [ideaId]);
+    const items = await db.queryAll(`${LIST} WHERE b.team_id = $2 AND ($1::uuid IS NULL OR b.idea_id = $1) ORDER BY b.updated_at DESC`, [ideaId, req.team!.id]);
     res.json({ items });
 }));
 
@@ -25,9 +27,10 @@ const create = z.object({ title: z.string().trim().max(200).default(''), idea_id
 
 router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(create, req.body);
+    if (!(await linksInTeam(req.team!.id, { ideas: b.idea_id }))) return foreignLink(res);
     const row = await db.queryOne(
-        'INSERT INTO boards (title, idea_id, owner_id) VALUES ($1, $2, $3) RETURNING id',
-        [b.title || 'Untitled board', b.idea_id ?? null, req.user!.id],
+        'INSERT INTO boards (title, idea_id, owner_id, team_id) VALUES ($1, $2, $3, $4) RETURNING id',
+        [b.title || 'Untitled board', b.idea_id ?? null, req.user!.id, req.team!.id],
     );
     res.status(201).json(row);
 }));
@@ -45,6 +48,7 @@ const patch = z.object({ title: z.string().trim().min(1).max(200).optional(), id
 router.patch('/:id', withDatabase(async (req, res, _n, db) => {
     const id = validate(uuid, req.params.id);
     const b = validate(patch, req.body);
+    if (!(await linksInTeam(req.team!.id, { ideas: b.idea_id }))) return foreignLink(res);
     const row = await db.queryOne(
         `UPDATE boards SET title = COALESCE($2, title),
             idea_id = CASE WHEN $3::boolean THEN $4::uuid ELSE idea_id END, updated_at = now()

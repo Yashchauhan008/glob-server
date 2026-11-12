@@ -3,6 +3,7 @@ import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
 import { validate } from '@/shared/helpers/validation.helper.js';
 import { notFound } from '@/shared/utilities/crud.js';
+import { foreignLink, inTeam, linksInTeam } from '@/modules/teams/team.scope.js';
 
 const qBody = z.object({
     title: z.string().trim().min(1).max(500),
@@ -11,23 +12,27 @@ const qBody = z.object({
 });
 const aBody = z.object({ body: z.string().trim().min(1).max(10000) });
 const router = Router();
+router.param('id', inTeam('questions'));
 
-router.get('/', withDatabase(async (_req, res, _n, db) => {
+router.get('/', withDatabase(async (req, res, _n, db) => {
     res.json({
         items: await db.queryAll(
             `SELECT q.*, u.name AS owner_name, i.title AS idea_title,
                 (SELECT count(*)::int FROM answers a WHERE a.question_id = q.id) AS answers_count
              FROM questions q JOIN users u ON u.id = q.owner_id LEFT JOIN ideas i ON i.id = q.idea_id
+             WHERE q.team_id = $1
              ORDER BY (q.accepted_answer_id IS NULL) DESC, q.created_at DESC`,
+            [req.team!.id],
         ),
     });
 }));
 
 router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(qBody, req.body);
+    if (!(await linksInTeam(req.team!.id, { ideas: b.idea_id }))) return foreignLink(res);
     res.status(201).json(await db.queryOne(
-        'INSERT INTO questions (owner_id,title,body,idea_id) VALUES ($1,$2,$3,$4) RETURNING *',
-        [req.user!.id, b.title, b.body, b.idea_id ?? null],
+        'INSERT INTO questions (owner_id,title,body,idea_id,team_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [req.user!.id, b.title, b.body, b.idea_id ?? null, req.team!.id],
     ));
 }));
 

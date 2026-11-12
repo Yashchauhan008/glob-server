@@ -11,18 +11,18 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
     const rows = await db.queryAll(
         `SELECT a.id, a.verb, a.entity_type, a.entity_id, a.title, a.detail, a.created_at, a.actor_id, u.name AS actor_name
          FROM activities a JOIN users u ON u.id = a.actor_id
-         WHERE ($1::timestamptz IS NULL OR a.created_at < $1)
+         WHERE a.team_id = $3 AND ($1::timestamptz IS NULL OR a.created_at < $1)
          ORDER BY a.created_at DESC LIMIT $2`,
-        [before && !Number.isNaN(before.getTime()) ? before.toISOString() : null, limit],
+        [before && !Number.isNaN(before.getTime()) ? before.toISOString() : null, limit, req.team!.id],
     );
     res.json({ items: rows });
 }));
 
 export default router;
 
-/** Record an auth event (login / sign-up) for the activity feed. Never blocks or fails the request. */
+/** Record an auth event (login / sign-up) in the feed of each team the person is in. Never blocks or fails the request. */
 export function logAuth(db: { query: (sql: string, params?: any[]) => Promise<unknown> }, userId: string, verb: string) {
-    return db.query("INSERT INTO activities (actor_id, verb, entity_type, title) VALUES ($1,$2,'auth','')", [userId, verb]).catch(() => {});
+    return db.query("INSERT INTO activities (actor_id, verb, entity_type, title, team_id) SELECT $1, $2, 'auth', '', team_id FROM team_members WHERE user_id = $1", [userId, verb]).catch(() => {});
 }
 
 // ---- automatic logging of successful writes ----
@@ -93,12 +93,12 @@ export async function activityLogger(req: Request, res: Response, next: NextFunc
     res.json = (b: any) => { out = b; return json(b); };
 
     res.on('finish', () => {
-        if (res.statusCode >= 300 || !req.user) return;
+        if (res.statusCode >= 300 || !req.user || !req.team) return;
         const e = describe(req.method, parts, req.body, out, before);
         if (!e) return;
         Database.query(
-            'INSERT INTO activities (actor_id, verb, entity_type, entity_id, title, detail) VALUES ($1,$2,$3,$4,$5,$6)',
-            [req.user.id, e.verb, e.type, e.id, e.title, e.detail ?? null],
+            'INSERT INTO activities (actor_id, verb, entity_type, entity_id, title, detail, team_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+            [req.user.id, e.verb, e.type, e.id, e.title, e.detail ?? null, req.team.id],
         ).catch(() => {});
     });
     next();

@@ -6,6 +6,7 @@ declare global {
       validatedQuery?: any;
       id?: string;
       user?: { id: string};
+      team?: { id: string; role: 'owner' | 'member' };
     }
   }
 }

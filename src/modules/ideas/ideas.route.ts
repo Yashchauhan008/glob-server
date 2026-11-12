@@ -3,6 +3,7 @@ import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
 import { validate } from '@/shared/helpers/validation.helper.js';
 import { patchRow, notFound } from '@/shared/utilities/crud.js';
+import { inTeam } from '@/modules/teams/team.scope.js';
 
 export const IDEA_STATUSES = ['idea', 'planning', 'building', 'paused', 'dropped', 'shipped'] as const;
 
@@ -24,6 +25,7 @@ const messagePatch = z.object({
 });
 
 const router = Router();
+router.param('id', inTeam('ideas'));
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const rows = await db.queryAll(
@@ -43,8 +45,8 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
                 SELECT DISTINCT u2.name FROM users u2 WHERE u2.id = i.owner_id
                   OR u2.id IN (SELECT owner_id FROM idea_messages WHERE idea_id = i.id)
                   OR u2.id IN (SELECT user_id FROM idea_votes WHERE idea_id = i.id) LIMIT 5) c) AS contributors
-         FROM ideas i JOIN users u ON u.id = i.owner_id ORDER BY i.created_at DESC`,
-        [req.user!.id],
+         FROM ideas i JOIN users u ON u.id = i.owner_id WHERE i.team_id = $2 ORDER BY i.created_at DESC`,
+        [req.user!.id, req.team!.id],
     );
     res.json({ items: rows });
 }));
@@ -52,8 +54,8 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
 router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(ideaBody, req.body);
     const row = await db.queryOne(
-        'INSERT INTO ideas (owner_id, title, description, status) VALUES ($1,$2,$3,$4) RETURNING *',
-        [req.user!.id, b.title, b.description, b.status],
+        'INSERT INTO ideas (owner_id, title, description, status, team_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [req.user!.id, b.title, b.description, b.status, req.team!.id],
     );
     res.status(201).json(row);
 }));

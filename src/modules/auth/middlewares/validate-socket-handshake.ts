@@ -4,6 +4,7 @@ import Database from '@/shared/helpers/database.helper.js';
 import { Socket } from 'socket.io';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import { accessFor } from '@/modules/access/access.service.js';
+import { roleIn, teamRoom } from '@/modules/teams/team.service.js';
 
 export default async function validateUserSocketHandShake(
     socket: Socket,
@@ -29,8 +30,14 @@ export default async function validateUserSocketHandShake(
 
         if (!(await accessFor(user.id)).ok) throw new ServerError('UNAUTHORIZED', 'access removed');
 
+        // every connection belongs to one team: its chat, cursors and boards stay inside it
+        const teamId = socket.handshake.auth.teamId;
+        if (typeof teamId !== 'string' || !(await roleIn(user.id, teamId))) throw new ServerError('UNAUTHORIZED', 'choose a team');
+
         socket.data.user = { id: user.id, name: user.name };
+        socket.data.team = { id: teamId };
         socket.join(user.id);
+        socket.join(teamRoom(teamId));
 
         next();
     } catch (error) {

@@ -2,11 +2,11 @@ import { Router } from 'express';
 import { AccessToken, RoomServiceClient, TrackType } from 'livekit-server-sdk';
 import env from '@/shared/configs/env.js';
 import withDatabase from '@/shared/utilities/with-database.js';
+import { callRoom } from '@/modules/teams/team.service.js';
 
 const router = Router();
 
-// One global room: whoever is signed in and online can join it.
-const ROOM = 'glob-live';
+// One call room per team: only the people in that team can join it.
 
 router.get('/token', withDatabase(async (req, res, _n, db) => {
     if (!env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET || !env.LIVEKIT_URL) {
@@ -23,12 +23,13 @@ router.get('/token', withDatabase(async (req, res, _n, db) => {
         name: me.name,
         ttl: '2h',
     });
-    at.addGrant({ room: ROOM, roomJoin: true, canPublish: true, canSubscribe: true });
+    at.addGrant({ room: callRoom(req.team!.id), roomJoin: true, canPublish: true, canSubscribe: true });
     res.json({ url: env.LIVEKIT_URL, token: await at.toJwt() });
 }));
 
 // Who is in the call right now and since when, so the pill can show it before you join.
-router.get('/status', async (_req, res) => {
+router.get('/status', async (req, res) => {
+    const ROOM = callRoom(req.team!.id);
     const empty = { active: false, startedAt: null as number | null, participants: [] as { id: string; name: string }[], video: false };
     if (!env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET || !env.LIVEKIT_URL) {
         res.json(empty);

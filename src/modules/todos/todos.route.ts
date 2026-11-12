@@ -3,6 +3,7 @@ import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
 import { validate } from '@/shared/helpers/validation.helper.js';
 import { patchRow, notFound } from '@/shared/utilities/crud.js';
+import { foreignLink, inTeam, linksInTeam } from '@/modules/teams/team.scope.js';
 
 const body = z.object({
     title: z.string().trim().min(1).max(500),
@@ -17,11 +18,12 @@ const body = z.object({
 const patch = body.extend({ done: z.boolean().optional() }).partial();
 
 const router = Router();
+router.param('id', inTeam('todos'));
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const filter = String(req.query.filter || 'all');
     const ideaId = typeof req.query.idea_id === 'string' && /^[0-9a-f-]{36}$/i.test(req.query.idea_id) ? req.query.idea_id : null;
-    const conds = [filter === 'open' ? 't.done = false' : filter === 'done' ? 't.done = true' : '', ideaId ? 't.idea_id = $1' : ''].filter(Boolean);
+    const conds = ['t.team_id = $1', filter === 'open' ? 't.done = false' : filter === 'done' ? 't.done = true' : '', ideaId ? 't.idea_id = $2' : ''].filter(Boolean);
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
     const items = await db.queryAll(
         `SELECT t.*, u.name AS owner_name, i.title AS idea_title, p.name AS product_name, l.name AS lead_name
@@ -31,31 +33,34 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
          LEFT JOIN products p ON p.id = t.product_id
          LEFT JOIN leads l ON l.id = t.lead_id
          ${where} ORDER BY t.done, t.due_date NULLS LAST, t.created_at DESC`,
-        ideaId ? [ideaId] : [],
+        ideaId ? [req.team!.id, ideaId] : [req.team!.id],
     );
     // lead follow-ups surface here too (read-only virtual items)
     const followUps = filter === 'done' || ideaId ? [] : await db.queryAll(
         `SELECT id AS lead_id, name AS lead_name, next_follow_up_at
-         FROM leads WHERE next_follow_up_at IS NOT NULL AND stage NOT IN ('won','lost')
+         FROM leads WHERE team_id = $1 AND next_follow_up_at IS NOT NULL AND stage NOT IN ('won','lost')
          ORDER BY next_follow_up_at`,
+        [req.team!.id],
     );
     res.json({ items, follow_ups: followUps });
 }));
 
 router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(body, req.body);
+    if (!(await linksInTeam(req.team!.id, { ideas: b.idea_id, idea_messages: b.note_id, products: b.product_id, leads: b.lead_id }))) return foreignLink(res);
     res.status(201).json(
         await db.queryOne(
-            `INSERT INTO todos (owner_id, title, done, due_date, idea_id, note_id, product_id, lead_id, completed_by, completed_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8, CASE WHEN $3 THEN $1::uuid END, CASE WHEN $3 THEN now() END) RETURNING *`,
+            `INSERT INTO todos (owner_id, title, done, due_date, idea_id, note_id, product_id, lead_id, team_id, completed_by, completed_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, CASE WHEN $3 THEN $1::uuid END, CASE WHEN $3 THEN now() END) RETURNING *`,
             [req.user!.id, b.title, b.done, b.due_date ?? null, b.idea_id ?? null, b.note_id ?? null,
-             b.product_id ?? null, b.lead_id ?? null],
+             b.product_id ?? null, b.lead_id ?? null, req.team!.id],
         ),
     );
 }));
 
 router.patch('/:id', withDatabase(async (req, res, _n, db) => {
     const data = validate(patch, req.body);
+    if (!(await linksInTeam(req.team!.id, { ideas: data.idea_id, idea_messages: data.note_id, products: data.product_id, leads: data.lead_id }))) return foreignLink(res);
     const before = await db.queryOne('SELECT done FROM todos WHERE id = $1', [req.params.id as string]);
     let row = await patchRow(db, 'todos', req.params.id as string, data);
     if (!row) return notFound(res);

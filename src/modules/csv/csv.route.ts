@@ -15,22 +15,22 @@ const send = (res: Response, name: string, csv: string) => {
 
 const exports_: Record<string, { sql: string; cols: string[] }> = {
     leads: {
-        sql: 'SELECT * FROM leads ORDER BY created_at',
+        sql: 'SELECT * FROM leads WHERE team_id = $1 ORDER BY created_at',
         cols: ['name', 'email', 'phone', 'company', 'source', 'stage', 'lost_reason', 'next_follow_up_at', 'address', 'latitude', 'longitude'],
     },
-    ideas: { sql: 'SELECT * FROM ideas ORDER BY created_at', cols: ['title', 'description', 'status'] },
+    ideas: { sql: 'SELECT * FROM ideas WHERE team_id = $1 ORDER BY created_at', cols: ['title', 'description', 'status'] },
     notes: {
-        sql: 'SELECT n.*, n.tag AS kind, i.title AS idea_title FROM idea_messages n JOIN ideas i ON i.id = n.idea_id ORDER BY n.created_at',
+        sql: 'SELECT n.*, n.tag AS kind, i.title AS idea_title FROM idea_messages n JOIN ideas i ON i.id = n.idea_id WHERE i.team_id = $1 ORDER BY n.created_at',
         cols: ['idea_title', 'kind', 'body'],
     },
-    products: { sql: 'SELECT * FROM products ORDER BY created_at', cols: ['name', 'url', 'status'] },
-    todos: { sql: 'SELECT * FROM todos ORDER BY created_at', cols: ['title', 'done', 'due_date'] },
+    products: { sql: 'SELECT * FROM products WHERE team_id = $1 ORDER BY created_at', cols: ['name', 'url', 'status'] },
+    todos: { sql: 'SELECT * FROM todos WHERE team_id = $1 ORDER BY created_at', cols: ['title', 'done', 'due_date'] },
 };
 
 router.get('/export/:entity', withDatabase(async (req, res, _n, db) => {
     const def = exports_[req.params.entity as string];
     if (!def) return res.status(404).json({ message: 'Unknown entity' });
-    send(res, req.params.entity as string, toCsv(await db.queryAll(def.sql), def.cols));
+    send(res, req.params.entity as string, toCsv(await db.queryAll(def.sql, [req.team!.id]), def.cols));
 }));
 
 type RowError = { row: number; message: string };
@@ -59,9 +59,9 @@ router.post('/import/leads', withDatabase(async (req, res, _n, db) => {
 
         const vals = [req.user!.id, r.name, email, r.phone || null, r.company || null, r.source || null, stage,
             stage === 'lost' ? r.lost_reason || null : null, follow, r.address || null, lat, lng,
-            stage === 'won' || stage === 'lost' ? new Date() : null];
+            stage === 'won' || stage === 'lost' ? new Date() : null, req.team!.id];
         const closes = vals[12] !== null;
-        const existing = email ? await db.queryOne('SELECT id FROM leads WHERE lower(email) = $1', [email]) : null;
+        const existing = email ? await db.queryOne('SELECT id FROM leads WHERE lower(email) = $1 AND team_id = $2', [email, req.team!.id]) : null;
         if (existing) {
             await db.query(
                 `UPDATE leads SET name=$2, phone=$3, company=$4, source=$5, stage=$6, lost_reason=$7,
@@ -74,8 +74,8 @@ router.post('/import/leads', withDatabase(async (req, res, _n, db) => {
         } else {
             await db.query(
                 `INSERT INTO leads (owner_id,name,email,phone,company,source,stage,lost_reason,
-                    next_follow_up_at,address,latitude,longitude,closed_at)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+                    next_follow_up_at,address,latitude,longitude,closed_at,team_id)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
                 vals as any[],
             );
             created++;
@@ -92,8 +92,8 @@ router.post('/import/ideas', withDatabase(async (req, res, _n, db) => {
         const status = (r.status || 'idea').toLowerCase();
         if (!r.title) { errors.push({ row: idx + 2, message: 'title is required' }); continue; }
         if (!(IDEA_STATUSES as readonly string[]).includes(status)) { errors.push({ row: idx + 2, message: `unknown status "${r.status}"` }); continue; }
-        await db.query('INSERT INTO ideas (owner_id,title,description,status) VALUES ($1,$2,$3,$4)',
-            [req.user!.id, r.title, r.description || '', status]);
+        await db.query('INSERT INTO ideas (owner_id,title,description,status,team_id) VALUES ($1,$2,$3,$4,$5)',
+            [req.user!.id, r.title, r.description || '', status, req.team!.id]);
         created++;
     }
     res.json({ created, updated: 0, errors });
@@ -106,8 +106,8 @@ router.post('/import/todos', withDatabase(async (req, res, _n, db) => {
     for (const [idx, r] of rows.entries()) {
         if (!r.title) { errors.push({ row: idx + 2, message: 'title is required' }); continue; }
         if (r.due_date && !/^\d{4}-\d{2}-\d{2}$/.test(r.due_date)) { errors.push({ row: idx + 2, message: 'due_date must be YYYY-MM-DD' }); continue; }
-        await db.query('INSERT INTO todos (owner_id,title,done,due_date) VALUES ($1,$2,$3,$4)',
-            [req.user!.id, r.title, ['true', '1', 'yes'].includes((r.done || '').toLowerCase()), r.due_date || null]);
+        await db.query('INSERT INTO todos (owner_id,title,done,due_date,team_id) VALUES ($1,$2,$3,$4,$5)',
+            [req.user!.id, r.title, ['true', '1', 'yes'].includes((r.done || '').toLowerCase()), r.due_date || null, req.team!.id]);
         created++;
     }
     res.json({ created, updated: 0, errors });

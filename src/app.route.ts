@@ -19,6 +19,8 @@ import qaRoutes from '@/modules/qa/qa.route.js';
 import voiceRoutes from '@/modules/voice/voice.route.js';
 import teamRoutes from '@/modules/team/team.route.js';
 import boardRoutes from '@/modules/boards/boards.route.js';
+import teamsRoutes from '@/modules/teams/teams.route.js';
+import { teamScope } from '@/modules/teams/team.scope.js';
 
 const router = Router();
 
@@ -26,8 +28,12 @@ router.use('/auth', authRoutes);
 router.use('/files', fileRoutes);
 
 router.use(authenticate);
-router.use(activityLogger);
 router.get('/me', (req, res) => res.json({ user: req.user }));
+router.use('/teams', teamsRoutes); // which teams can I open? (the admin also creates them here)
+
+// everything below belongs to one team, chosen with the X-Team-Id header
+router.use(teamScope);
+router.use(activityLogger);
 router.use('/ideas', ideaRoutes);
 router.use('/products', productRoutes);
 router.use('/todos', todoRoutes);

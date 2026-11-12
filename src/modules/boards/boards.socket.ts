@@ -14,6 +14,7 @@ async function sendPeers(io: Server, id: string) {
 
 export default function registerBoards(io: Server, socket: Socket) {
     const user = socket.data.user as { id: string; name: string };
+    const teamId = socket.data.team.id as string;
 
     const leave = async (id: string) => {
         socket.leave(room(id));
@@ -23,7 +24,7 @@ export default function registerBoards(io: Server, socket: Socket) {
 
     socket.on('board:join', async (payload: { boardId?: string }) => {
         if (!isId(payload?.boardId)) return;
-        const exists = await Database.queryOne('SELECT 1 AS ok FROM boards WHERE id = $1', [payload.boardId]);
+        const exists = await Database.queryOne('SELECT 1 AS ok FROM boards WHERE id = $1 AND team_id = $2', [payload.boardId, teamId]);
         if (!exists) return;
         socket.join(room(payload.boardId));
         await sendPeers(io, payload.boardId);

@@ -4,6 +4,7 @@ import { STATUS_CODES } from '@/shared/constants/status-codes.js';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import z from 'zod';
 import { logAuth } from '@/modules/activity/activity.route.js';
+import { claimInvites } from '@/modules/teams/team.service.js';
 import bcrypt from 'bcryptjs';
 import { createJWTToken } from '@/shared/utilities/token.js';
 import { DENIED, emailAllowed, isRootEmail } from '@/modules/access/access.service.js';
@@ -44,6 +45,7 @@ export async function Controller(
         '24h',
     );
 
+    await claimInvites(db, user.id, user.email);
     await logAuth(db, user.id, 'logged in');
 
     return res.status(STATUS_CODES.OK).json({

@@ -6,6 +6,8 @@ import { notFound } from '@/shared/utilities/crud.js';
 import { upload as imageUpload } from '@/shared/middlewares/multer/image-upload.js';
 import { registerNewFile, hardDeleteFile } from '@/modules/file/file.service.js';
 import { enrichLink } from '@/modules/attachments/link-preview.js';
+import Database from '@/shared/helpers/database.helper.js';
+import { inTeam } from '@/modules/teams/team.scope.js';
 
 const ENTITIES = ['idea', 'note', 'question', 'todo', 'event', 'lead'] as const;
 
@@ -19,14 +21,26 @@ const body = z.object({
 });
 
 const router = Router();
+router.param('id', inTeam('attachments'));
+
+// where each kind of attachment hangs: the thing it is attached to must belong to the team
+const PARENT: Record<(typeof ENTITIES)[number], string> = {
+    idea: 'SELECT 1 AS ok FROM ideas WHERE id = $1 AND team_id = $2',
+    note: 'SELECT 1 AS ok FROM idea_messages m JOIN ideas i ON i.id = m.idea_id WHERE m.id = $1 AND i.team_id = $2',
+    question: 'SELECT 1 AS ok FROM questions WHERE id = $1 AND team_id = $2',
+    todo: 'SELECT 1 AS ok FROM todos WHERE id = $1 AND team_id = $2',
+    event: 'SELECT 1 AS ok FROM events WHERE id = $1 AND team_id = $2',
+    lead: 'SELECT 1 AS ok FROM leads WHERE id = $1 AND team_id = $2',
+};
+const parentInTeam = async (type: (typeof ENTITIES)[number], id: string, teamId: string) => !!(await Database.queryOne(PARENT[type], [id, teamId]));
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const { type, id } = validate(z.object({ type: z.enum(ENTITIES), id: z.string().uuid() }), req.query);
     const items = await db.queryAll(
         `SELECT a.id, a.kind, a.url, a.title, a.thumb_url, a.created_at, a.owner_id, u.name AS owner_name
          FROM attachments a JOIN users u ON u.id = a.owner_id
-         WHERE a.entity_type = $1 AND a.entity_id = $2 ORDER BY a.created_at`,
-        [type, id],
+         WHERE a.entity_type = $1 AND a.entity_id = $2 AND a.team_id = $3 ORDER BY a.created_at`,
+        [type, id, req.team!.id],
     );
     res.json({ items });
 }));
@@ -40,6 +54,7 @@ router.post('/upload', imageUpload.single('file'), withDatabase(async (req, res,
 
 router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(body, req.body);
+    if (!(await parentInTeam(b.entity_type, b.entity_id, req.team!.id))) return notFound(res);
     let url = b.url ?? '';
     let fileId: string | null = null;
 
@@ -53,9 +68,9 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
     }
 
     const row = await db.queryOne(
-        `INSERT INTO attachments (entity_type, entity_id, kind, url, title, file_id, owner_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [b.entity_type, b.entity_id, b.kind, url, b.title, fileId, req.user!.id],
+        `INSERT INTO attachments (entity_type, entity_id, kind, url, title, file_id, owner_id, team_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        [b.entity_type, b.entity_id, b.kind, url, b.title, fileId, req.user!.id, req.team!.id],
     );
     res.status(201).json(row);
     // previews can be slow or blocked, so they never hold up saving; the UI picks them up shortly after

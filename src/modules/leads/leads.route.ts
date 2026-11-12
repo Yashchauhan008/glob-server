@@ -3,6 +3,7 @@ import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
 import { validate } from '@/shared/helpers/validation.helper.js';
 import { patchRow, notFound } from '@/shared/utilities/crud.js';
+import { inTeam } from '@/modules/teams/team.scope.js';
 
 export const STAGES = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost'] as const;
 const KINDS = ['call', 'email', 'meeting', 'note', 'stage_change'] as const;
@@ -29,12 +30,14 @@ const activityBody = z.object({
 });
 
 const router = Router();
+router.param('id', inTeam('leads'));
 
-router.get('/', withDatabase(async (_req, res, _n, db) => {
+router.get('/', withDatabase(async (req, res, _n, db) => {
     res.json({
         items: await db.queryAll(
             `SELECT l.*, u.name AS owner_name FROM leads l JOIN users u ON u.id = l.owner_id
-             ORDER BY l.created_at DESC`,
+             WHERE l.team_id = $1 ORDER BY l.created_at DESC`,
+            [req.team!.id],
         ),
     });
 }));
@@ -43,12 +46,12 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
     const b = validate(body, req.body);
     const row = await db.queryOne(
         `INSERT INTO leads (owner_id, name, email, phone, company, source, stage, lost_reason,
-            next_follow_up_at, address, latitude, longitude, closed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            next_follow_up_at, address, latitude, longitude, closed_at, team_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING *`,
         [req.user!.id, b.name, b.email, b.phone, b.company, b.source, b.stage, b.lost_reason,
          b.next_follow_up_at ?? null, b.address, b.latitude ?? null, b.longitude ?? null,
-         b.stage === 'won' || b.stage === 'lost' ? new Date() : null],
+         b.stage === 'won' || b.stage === 'lost' ? new Date() : null, req.team!.id],
     );
     res.status(201).json(row);
 }));

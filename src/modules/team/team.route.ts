@@ -7,126 +7,91 @@ import { upload as imageUpload } from '@/shared/middlewares/multer/image-upload.
 import { hardDeleteFile, registerNewFile } from '@/modules/file/file.service.js';
 import Database from '@/shared/helpers/database.helper.js';
 import { ROOT_EMAIL, isRoot, isRootEmail } from '@/modules/access/access.service.js';
-import { kickUser } from '@/modules/access/access.kick.js';
-import env from '@/shared/configs/env.js';
-import Logger from '@/shared/configs/logger.js';
-import { renderEmailTemplates, sendMail } from '@/shared/utilities/mail.js';
-import SocketService from '@/socket.js';
+import { kickFromTeam, kickUser } from '@/modules/access/access.kick.js';
+import { teamOwner } from '@/modules/teams/team.scope.js';
+import { forgetMembership } from '@/modules/teams/team.service.js';
+import { inviteEmails, notifyInvited } from '@/modules/teams/team.invites.js';
 
+// Everything here works on the team the request is for (req.team), chosen by the X-Team-Id header.
 const router = Router();
 
+/** Platform-wide actions (blocking an account, deleting it) stay with the admin; they reach across every team. */
 const rootOnly: RequestHandler = async (req, res, next) => {
     if (await isRoot(req.user!.id)) return next();
     res.status(403).json({ message: 'Only the admin can do this' });
 };
 
-/** Everyone on the team, with a few numbers for their card. Blocked or un-invited people are only shown to the admin. */
+/** Everyone in this team, with a few numbers for their card. Blocked people are only shown to owners. */
 router.get('/', withDatabase(async (req, res, _n, db) => {
+    const teamId = req.team!.id;
     const rows = await db.queryAll(
-        `SELECT u.id, u.name, u.email, u.avatar_url, u.created_at, u.blocked_at,
-                EXISTS (SELECT 1 FROM allowed_emails a WHERE a.email = lower(u.email)) AS invited,
-                (SELECT count(*)::int FROM ideas i WHERE i.owner_id = u.id) AS ideas,
-                (SELECT count(*)::int FROM todos t WHERE t.completed_by = u.id AND t.done) AS tasks_done,
+        `SELECT u.id, u.name, u.email, u.avatar_url, u.created_at, u.blocked_at, m.role,
+                (SELECT count(*)::int FROM ideas i WHERE i.owner_id = u.id AND i.team_id = $1) AS ideas,
+                (SELECT count(*)::int FROM todos t WHERE t.completed_by = u.id AND t.done AND t.team_id = $1) AS tasks_done,
                 u.live_seconds::float8 AS live_seconds,
-                (SELECT max(a.created_at) FROM activities a WHERE a.actor_id = u.id) AS last_active
-         FROM users u ORDER BY lower(u.name)`,
+                (SELECT max(a.created_at) FROM activities a WHERE a.actor_id = u.id AND a.team_id = $1) AS last_active
+         FROM team_members m JOIN users u ON u.id = m.user_id
+         WHERE m.team_id = $1 ORDER BY lower(u.name)`,
+        [teamId],
     );
-    const admin = await isRoot(req.user!.id);
+    const manager = req.team!.role === 'owner';
     const items = rows
-        .map(({ blocked_at, invited, ...u }) => {
+        .map(({ blocked_at, ...u }) => {
             const root = isRootEmail(u.email as string);
-            const status = root ? 'active' : blocked_at ? 'blocked' : invited ? 'active' : 'not_invited';
-            return { ...u, status, is_root: root };
+            return { ...u, status: root ? 'active' : blocked_at ? 'blocked' : 'active', is_root: root };
         })
-        .filter((u) => admin || u.status === 'active');
+        .filter((u) => manager || u.status === 'active');
     res.json({ items });
 }));
 
-/** Lets the app know whether to show the admin tools. */
-router.get('/access', withDatabase(async (req, res) => { res.json({ is_root: await isRoot(req.user!.id) }); }));
-
-// ---- invite list (admin only): who is allowed to sign in ----
-
-router.get('/invites', rootOnly, withDatabase(async (_req, res, _n, db) => {
-    const items = await db.queryAll(
-        `SELECT a.email, a.created_at, u.id AS user_id, u.name, u.blocked_at, ab.name AS added_by
-         FROM allowed_emails a
-         LEFT JOIN users u ON lower(u.email) = a.email
-         LEFT JOIN users ab ON ab.id = a.added_by
-         ORDER BY a.created_at DESC, a.email`,
-    );
-    res.json({ root_email: ROOT_EMAIL || null, items: items.map(({ blocked_at, ...i }) => ({ ...i, blocked: !!blocked_at })) });
+/** Lets the app know which tools to show: the platform admin's, the team owner's, or none. */
+router.get('/access', withDatabase(async (req, res) => {
+    res.json({ is_root: await isRoot(req.user!.id), role: req.team!.role, can_manage: req.team!.role === 'owner' });
 }));
 
-const inviteBody = z.object({ emails: z.string().max(10000) });
+// ---- invitations (team owners): who may join this team ----
 
-router.post('/invites', rootOnly, withDatabase(async (req, res, _n, db) => {
-    const { emails } = validate(inviteBody, req.body);
+router.get('/invites', teamOwner, withDatabase(async (req, res, _n, db) => {
+    const items = await db.queryAll(
+        `SELECT i.email, i.role, i.created_at, ab.name AS added_by
+         FROM team_invites i LEFT JOIN users ab ON ab.id = i.added_by
+         WHERE i.team_id = $1 ORDER BY i.created_at DESC, i.email`,
+        [req.team!.id],
+    );
+    res.json({ items });
+}));
+
+const inviteBody = z.object({ emails: z.string().max(10000), role: z.enum(['owner', 'member']).default('member') });
+
+router.post('/invites', teamOwner, withDatabase(async (req, res, _n, db) => {
+    const { emails, role } = validate(inviteBody, req.body);
+    const teamId = req.team!.id;
     const wanted = [...new Set(emails.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))].slice(0, 200);
     const valid = wanted.filter((e) => z.email().safeParse(e).success);
     const invalid = wanted.filter((e) => !valid.includes(e));
     if (!valid.length) return res.status(400).json({ message: invalid.length ? `Not a valid email: ${invalid.join(', ')}` : 'Type at least one email' });
-    const fresh: string[] = [];
-    for (const email of valid) {
-        const r = await db.query('INSERT INTO allowed_emails (email, added_by) VALUES ($1, $2) ON CONFLICT DO NOTHING', [email as string, req.user!.id as string]);
-        if (r.rowCount) fresh.push(email as string);
-    }
+
+    const fresh = await inviteEmails(db, teamId, req.user!.id, valid as string[], role);
     const added = fresh.length;
     res.status(201).json({ added, already: valid.length - added, invalid });
-
-    // a warm welcome to each newly invited person; sent after replying so a slow mail server never holds up the page
-    if (fresh.length) {
-        const inviter = await db.queryOne('SELECT name FROM users WHERE id = $1', [req.user!.id]);
-        const invitedBy = (inviter?.name as string | undefined) ?? '';
-        SocketService.io?.emit('team:invited', { emails: fresh, invitedBy, invitedById: req.user!.id });
-        void holdInviteNotices(fresh, invitedBy);
-        void sendInvites(fresh, invitedBy);
-    }
+    void notifyInvited(teamId, req.user!.id, fresh); // after replying, so a slow mail server never holds up the page
 }));
 
-/** The invited person may be offline. Keep the popup until they next open Glob, or send it now if they are here. */
-async function holdInviteNotices(emails: string[], invitedBy: string) {
-    const io = SocketService.io;
-    const title = invitedBy ? `${invitedBy} invited you` : 'You are invited to Glob';
-    for (const email of emails) {
-        const body = 'Open Glob to join the team';
-        const tag = `glob-invite-${email}`;
-        const user = await Database.queryOne('SELECT id FROM users WHERE lower(email) = $1', [email]);
-        const userId = user?.id as string | undefined;
-        const sockets = userId && io ? await io.in(userId).fetchSockets() : [];
-        if (sockets.length && io && userId) {
-            io.to(userId).emit('notice', { title, body, tag });
-            continue;
-        }
-        await Database.query(
-            'INSERT INTO notices (user_id, email, title, body, tag) VALUES ($1, $2, $3, $4, $5)',
-            [userId ?? null, email, title, body, tag],
-        );
-    }
-}
-
-async function sendInvites(emails: string[], invitedBy: string) {
-    for (const email of emails) {
-        try {
-            const html = await renderEmailTemplates('invite', { email, invitedBy, appUrl: env.APP_URL });
-            await sendMail({ to: email, subject: invitedBy ? `${invitedBy} invited you to Glob` : 'You are invited to Glob', html });
-        } catch (e) {
-            Logger.error(`Invite email to ${email} failed: ${(e as Error).message}`);
-        }
-    }
-}
-
-router.delete('/invites/:email', rootOnly, withDatabase(async (req, res, _n, db) => {
+/** Withdraw a waiting invitation. If that email is not signed up anywhere and has no other invitation, it can no longer sign up. */
+router.delete('/invites/:email', teamOwner, withDatabase(async (req, res, _n, db) => {
     const email = decodeURIComponent(String(req.params.email)).trim().toLowerCase();
-    if (isRootEmail(email)) return res.status(400).json({ message: 'The admin email cannot be removed' });
-    await db.query('DELETE FROM allowed_emails WHERE email = $1', [email]);
-    // someone who was already signed in loses access straight away
-    const user = await db.queryOne('SELECT id FROM users WHERE lower(email) = $1', [email]);
-    if (user) await kickUser(user.id as string);
+    await db.query('DELETE FROM team_invites WHERE team_id = $1 AND email = $2', [req.team!.id, email]);
+    if (!isRootEmail(email))
+        await db.query(
+            `DELETE FROM allowed_emails WHERE email = $1
+               AND NOT EXISTS (SELECT 1 FROM team_invites WHERE email = $1)
+               AND NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1)`,
+            [email],
+        );
     res.status(204).end();
 }));
 
-// ---- block / unblock / remove a member (admin only) ----
+// ---- members ----
 
 /** Loads the person to act on, and refuses to touch the admin or yourself. */
 async function target(req: Request, res: Response) {
@@ -134,10 +99,21 @@ async function target(req: Request, res: Response) {
     const row = await Database.queryOne('SELECT id, name, email, avatar_url FROM users WHERE id = $1', [id]);
     if (!row) { res.status(404).json({ message: 'Member not found' }); return null; }
     if (isRootEmail(row.email as string) || row.id === req.user!.id) {
-        res.status(400).json({ message: 'You cannot do this to the admin account' });
+        res.status(400).json({ message: 'You cannot do this to the admin account or to yourself' });
         return null;
     }
     return row;
+}
+
+/** Like target(), and the person must be in this team (so an owner can never reach into another team). */
+async function teammate(req: Request, res: Response) {
+    const who = await target(req, res);
+    if (!who) return null;
+    if (!(await Database.queryOne('SELECT 1 AS ok FROM team_members WHERE team_id = $1 AND user_id = $2', [req.team!.id, who.id as string]))) {
+        res.status(404).json({ message: 'Member not found' });
+        return null;
+    }
+    return who;
 }
 
 router.post('/:id/block', rootOnly, async (req, res, next) => {
@@ -160,11 +136,41 @@ router.post('/:id/unblock', rootOnly, async (req, res, next) => {
     } catch (e) { next(e); }
 });
 
+/** Make someone an owner of this team, or a regular member again. */
+router.patch('/:id/role', teamOwner, async (req, res, next) => {
+    try {
+        const { role } = validate(z.object({ role: z.enum(['owner', 'member']) }), req.body);
+        const who = await teammate(req, res);
+        if (!who) return;
+        await Database.query('UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2', [req.team!.id, who.id as string, role]);
+        forgetMembership(who.id as string);
+        res.json({ id: who.id, role });
+    } catch (e) { next(e); }
+});
+
+/** Take someone out of this team. Their ideas, tasks and messages stay with the team; their account and other teams are untouched. */
+router.delete('/:id', teamOwner, async (req, res, next) => {
+    try {
+        const who = await teammate(req, res);
+        if (!who) return;
+        await Database.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [req.team!.id, who.id as string]);
+        await kickFromTeam(who.id as string, req.team!.id);
+        res.status(204).end();
+    } catch (e) { next(e); }
+});
+
+/** The stored copy of someone's old picture, so replacing or removing it does not leave files behind in S3. */
+async function dropOldAvatar(db: Parameters<Parameters<typeof withDatabase>[0]>[3], url: string | null) {
+    if (!url) return;
+    const file = await db.queryOne('SELECT id FROM files WHERE url = $1', [url]);
+    if (file) await hardDeleteFile(db, { id: file.id as string });
+}
+
 /**
- * Remove someone from the team for good. Their ideas, tasks, leads, boards and messages stay useful,
- * so they are handed to the admin; their votes and activity log go with them. They are also taken off the invite list.
+ * Admin only: delete the account itself, from every team. Their ideas, tasks, leads, boards and messages stay useful,
+ * so they are handed to the admin; their votes and activity log go with them.
  */
-router.delete('/:id', rootOnly, withDatabase(async (req, res, _n, db) => {
+router.delete('/:id/account', rootOnly, withDatabase(async (req, res, _n, db) => {
     const who = await target(req, res);
     if (!who) return;
     const admin = await db.queryOne('SELECT id FROM users WHERE lower(email) = $1', [ROOT_EMAIL]);
@@ -200,13 +206,6 @@ const profile = z.object({
 });
 
 const publicUser = 'id, name, email, avatar_url';
-
-/** The stored copy of someone's old picture, so replacing or removing it does not leave files behind in S3. */
-async function dropOldAvatar(db: Parameters<Parameters<typeof withDatabase>[0]>[3], url: string | null) {
-    if (!url) return;
-    const file = await db.queryOne('SELECT id FROM files WHERE url = $1', [url]);
-    if (file) await hardDeleteFile(db, { id: file.id as string });
-}
 
 /** Who is being edited: yourself ("me"), or - for the admin only - anyone. */
 async function editableId(req: Request, res: Response): Promise<string | null> {
