@@ -93,6 +93,51 @@ router.delete('/todos/:id', withDatabase(async (req, res, _n, db) => {
     res.status(204).end();
 }));
 
+// ---- dashboard blocks: pasted HTML that runs in a sandbox on the front end, with its saved data kept here ----
+const MAX_HTML = 300_000;
+const MAX_DATA = 500_000;
+const widget = z.object({
+    title: z.string().trim().min(1).max(120).default('Untitled block'),
+    html: z.string().max(MAX_HTML, 'That code is too long (300 KB at most)'),
+});
+// what a block stored with localStorage: names to text values, nothing else
+const widgetData = z.record(z.string().max(200), z.string()).refine((d) => JSON.stringify(d).length <= MAX_DATA, 'Saved data is too large (500 KB at most)');
+
+router.get('/widgets', withDatabase(async (req, res, _n, db) => {
+    res.json({ items: await db.queryAll('SELECT id, title, html, data, position, created_at, updated_at FROM personal_widgets WHERE owner_id = $1 ORDER BY position, created_at', [req.user!.id]) });
+}));
+router.post('/widgets', withDatabase(async (req, res, _n, db) => {
+    const b = validate(widget, req.body);
+    res.status(201).json(await db.queryOne(
+        `INSERT INTO personal_widgets (owner_id, title, html, position)
+         VALUES ($1,$2,$3, coalesce((SELECT max(position) + 1 FROM personal_widgets WHERE owner_id = $1), 0)) RETURNING *`,
+        [req.user!.id, b.title, b.html],
+    ));
+}));
+router.patch('/widgets/:id', withDatabase(async (req, res, _n, db) => {
+    const b = validate(widget.partial(), req.body);
+    const row = await db.queryOne(
+        'UPDATE personal_widgets SET title = COALESCE($3, title), html = COALESCE($4, html), updated_at = now() WHERE id = $1 AND owner_id = $2 RETURNING *',
+        [req.params.id as string, req.user!.id, b.title ?? null, b.html ?? null],
+    );
+    if (!row) return notFound(res);
+    res.json(row);
+}));
+/** The block's saved data. Replaces the whole object, since the block always sends everything it has. */
+router.put('/widgets/:id/data', withDatabase(async (req, res, _n, db) => {
+    const { data } = validate(z.object({ data: widgetData }), req.body) as { data: Record<string, string> };
+    const row = await db.queryOne(
+        'UPDATE personal_widgets SET data = $3::jsonb WHERE id = $1 AND owner_id = $2 RETURNING id',
+        [req.params.id as string, req.user!.id, JSON.stringify(data)],
+    );
+    if (!row) return notFound(res);
+    res.status(204).end();
+}));
+router.delete('/widgets/:id', withDatabase(async (req, res, _n, db) => {
+    await db.query('DELETE FROM personal_widgets WHERE id = $1 AND owner_id = $2', [req.params.id as string, req.user!.id]);
+    res.status(204).end();
+}));
+
 router.use('/pins', makePinsRouter('personal'));
 
 export default router;
