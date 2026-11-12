@@ -26,6 +26,28 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
     res.json({ is_root: await isRoot(req.user!.id), last_team_id: me?.last_team_id ?? null, items: await teamsFor(req.user!.id) });
 }));
 
+/** A glance at each workspace you can open, for the workspaces page: counts, people, what is next, how recently it moved. */
+router.get('/overview', withDatabase(async (req, res, _n, db) => {
+    const admin = await isRoot(req.user!.id);
+    const items = await db.queryAll(
+        `SELECT t.id,
+            (SELECT count(*)::int FROM ideas WHERE team_id = t.id) AS ideas,
+            (SELECT count(*)::int FROM todos WHERE team_id = t.id AND NOT done) AS open_tasks,
+            (SELECT count(*)::int FROM todos WHERE team_id = t.id AND NOT done AND due_date IS NOT NULL AND due_date <= current_date) AS tasks_due,
+            (SELECT count(*)::int FROM leads WHERE team_id = t.id AND stage NOT IN ('won','lost')) AS open_leads,
+            (SELECT count(*)::int FROM events WHERE team_id = t.id AND starts_at >= now() AND starts_at < now() + interval '7 days') AS events_week,
+            (SELECT row_to_json(e) FROM (SELECT title, starts_at FROM events WHERE team_id = t.id AND starts_at >= now() ORDER BY starts_at LIMIT 1) e) AS next_event,
+            (SELECT max(created_at) FROM activities WHERE team_id = t.id AND entity_type <> 'auth') AS last_activity,
+            (SELECT coalesce(json_agg(p), '[]'::json) FROM (
+                SELECT u.id, u.name, u.avatar_url FROM team_members m JOIN users u ON u.id = m.user_id
+                WHERE m.team_id = t.id ORDER BY (m.role = 'owner') DESC, lower(u.name) LIMIT 6) p) AS people
+         FROM teams t
+         ${admin ? '' : 'WHERE EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = t.id AND m.user_id = $1)'}`,
+        admin ? [] : [req.user!.id],
+    );
+    res.json({ items });
+}));
+
 /** Remember which team this person is working in, so the next sign-in (on any device) opens it. */
 router.put('/:id/last', withDatabase(async (req, res, _n, db) => {
     const id = validate(z.string().uuid(), req.params.id);
