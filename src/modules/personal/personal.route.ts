@@ -103,8 +103,33 @@ const widget = z.object({
 // what a block stored with localStorage: names to text values, nothing else
 const widgetData = z.record(z.string().max(200), z.string()).refine((d) => JSON.stringify(d).length <= MAX_DATA, 'Saved data is too large (500 KB at most)');
 
+// what a brand-new dashboard starts with: a working counter whose number is kept in the account
+const STARTER = `<div style="font-family:system-ui,sans-serif;text-align:center;padding:48px 16px">
+  <h1 style="margin:0 0 4px">My dashboard</h1>
+  <p style="opacity:.7;margin:0 0 28px">Open the pencil to replace this with your own HTML.</p>
+  <div id="n" style="font-size:80px;font-weight:800">0</div>
+  <button id="plus" style="font-size:18px;padding:8px 18px">+1</button> <button id="reset" style="font-size:18px;padding:8px 18px">Reset</button>
+</div>
+<script>
+  // localStorage works as usual: the value is saved to your account and is still there after a refresh
+  let n = Number(localStorage.getItem('count') || 0);
+  const show = () => document.getElementById('n').textContent = n;
+  document.getElementById('plus').onclick = () => { n++; localStorage.setItem('count', n); show(); };
+  document.getElementById('reset').onclick = () => { n = 0; localStorage.setItem('count', n); show(); };
+  show();
+</script>`;
+
+const WIDGET_COLUMNS = 'id, title, html, data, position, created_at, updated_at';
+
+/** Everyone always has at least one dashboard: the first time they look, a starter one is made. */
 router.get('/widgets', withDatabase(async (req, res, _n, db) => {
-    res.json({ items: await db.queryAll('SELECT id, title, html, data, position, created_at, updated_at FROM personal_widgets WHERE owner_id = $1 ORDER BY position, created_at', [req.user!.id]) });
+    const me = req.user!.id;
+    await db.query(
+        `INSERT INTO personal_widgets (owner_id, title, html, position)
+         SELECT $1, 'My dashboard', $2, 0 WHERE NOT EXISTS (SELECT 1 FROM personal_widgets WHERE owner_id = $1)`,
+        [me, STARTER],
+    );
+    res.json({ items: await db.queryAll(`SELECT ${WIDGET_COLUMNS} FROM personal_widgets WHERE owner_id = $1 ORDER BY position, created_at`, [me]) });
 }));
 router.post('/widgets', withDatabase(async (req, res, _n, db) => {
     const b = validate(widget, req.body);
@@ -134,6 +159,8 @@ router.put('/widgets/:id/data', withDatabase(async (req, res, _n, db) => {
     res.status(204).end();
 }));
 router.delete('/widgets/:id', withDatabase(async (req, res, _n, db) => {
+    const left = await db.queryOne('SELECT count(*)::int AS n FROM personal_widgets WHERE owner_id = $1', [req.user!.id]);
+    if ((left?.n ?? 0) <= 1) return res.status(400).json({ message: 'You need at least one dashboard. Edit it instead.' });
     await db.query('DELETE FROM personal_widgets WHERE id = $1 AND owner_id = $2', [req.params.id as string, req.user!.id]);
     res.status(204).end();
 }));
