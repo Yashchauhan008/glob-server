@@ -19,8 +19,13 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
                 AND NOT EXISTS (SELECT 1 FROM answers a WHERE a.question_id = q.id AND a.owner_id = $1)) AS qa,
             -- events starting within the next 24 hours
             (SELECT count(*)::int FROM events e WHERE e.team_id = $3 AND e.starts_at >= now() AND e.starts_at < now() + interval '24 hours') AS calendar,
-            -- open tasks due today or already late
-            (SELECT count(*)::int FROM todos t WHERE t.team_id = $3 AND t.done = false AND t.due_date IS NOT NULL AND t.due_date <= current_date) AS tasks,
+            -- open tasks, plus lead follow-ups that are due (shown on the Tasks nav badge)
+            (SELECT
+                (SELECT count(*)::int FROM todos t WHERE t.team_id = $3 AND t.done = false)
+              + (SELECT count(*)::int FROM leads l
+                  WHERE l.team_id = $3 AND l.next_follow_up_at IS NOT NULL AND l.next_follow_up_at <= now()
+                    AND l.stage NOT IN ('won', 'lost'))
+            ) AS tasks,
             -- leads whose follow-up date has come
             (SELECT count(*)::int FROM leads l
               WHERE l.team_id = $3 AND l.next_follow_up_at IS NOT NULL AND l.next_follow_up_at <= now() AND l.stage NOT IN ('won', 'lost')) AS crm,

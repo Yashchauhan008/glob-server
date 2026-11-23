@@ -30,8 +30,8 @@ app.get('/', (req, res) => {
         version: '1.0.0',
         startTime: serverStartTimeStamp,
         service: env.SERVICE_NAME,
-        codeSign: 'R.P.Raiyani',
-        author: 'rajraiyani.com',
+        codeSign: 'Yash Chauhan',
+        author: 'yashchauhan.pro',
     });
 });
 
