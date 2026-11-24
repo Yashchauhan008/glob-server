@@ -4,7 +4,7 @@ import { sendPush, type PushPayload } from '@/modules/notifications/fcm.js';
 
 export type NotifyInput = {
     teamId: string | null;
-    type: 'dm' | 'chat' | 'answer' | 'general';
+    type: 'dm' | 'chat' | 'answer' | 'call' | 'general';
     label: string; // the tag shown above the notification: "Direct message", "Workspace chat · Acme", ...
     title: string;
     body: string;
@@ -43,7 +43,7 @@ export async function notifyUser(userId: string, n: NotifyInput) {
     const io = SocketService.io;
     if (io) io.to(userId).emit('notification', row);
 
-    const channel: PushPayload['channel'] = n.type === 'dm' ? 'dm' : n.type === 'chat' ? 'workspace' : 'general';
+    const channel: PushPayload['channel'] = n.type === 'dm' || n.type === 'call' ? 'dm' : n.type === 'chat' ? 'workspace' : 'general';
     await sendPush(userId, {
         title: n.title,
         body: n.body,

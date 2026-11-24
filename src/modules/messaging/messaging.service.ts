@@ -40,8 +40,23 @@ const clock = (ms?: number | null) => {
     const s = Math.round(ms / 1000);
     return ` ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-export function preview(m: Pick<MessageInput, 'kind' | 'body' | 'file_name' | 'duration_ms'>) {
+/** "missed:voice", "ended:video:125", "declined:voice", "group:video:300:4" -> a short sentence */
+export function callText(body: string) {
+    const [what, kind, a, b] = body.split(':');
+    const word = kind === 'video' ? 'video' : 'voice';
+    const dur = (sec?: string) => {
+        const n = Number(sec ?? 0);
+        return n > 0 ? ` · ${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}` : '';
+    };
+    if (what === 'missed') return `Missed ${word} call`;
+    if (what === 'declined') return `${word[0]!.toUpperCase()}${word.slice(1)} call declined`;
+    if (what === 'group') return `Group ${word} call${dur(a)}${b ? ` · ${b} joined` : ''}`;
+    return `${word[0]!.toUpperCase()}${word.slice(1)} call${dur(a)}`;
+}
+
+export function preview(m: { kind: string; body: string; file_name?: string | null; duration_ms?: number | null }) {
     switch (m.kind) {
+        case 'call': return `📞 ${callText(m.body)}`;
         case 'image': return '📷 Photo';
         case 'video': return '🎥 Video';
         case 'audio': return `🎤 Voice message${clock(m.duration_ms)}`;
@@ -90,11 +105,35 @@ export async function sendWorkspaceMessage(who: Who, teamId: string, raw: unknow
             label: `Workspace chat · ${team?.name ?? ''}`,
             title: who.name,
             body: preview(m),
-            data: { team_id: teamId },
+            data: { team_id: teamId, team_name: team?.name ?? '' },
             groupKey: `chat:${teamId}`,
         })));
     })();
     return msg;
+}
+
+/**
+ * A line in a chat about a call (missed, ended, declined). Written by the server, never by a client.
+ * `recipientId` set = personal chat; null = the workspace chat.
+ */
+export async function postCallMessage(teamId: string, senderId: string, recipientId: string | null, body: string, unread: boolean) {
+    const io = SocketService.io;
+    if (recipientId) {
+        const row = await Database.queryOne<{ id: string }>(
+            `INSERT INTO dm_messages (team_id, sender_id, recipient_id, body, kind, delivered_at, read_at)
+             VALUES ($1,$2,$3,$4,'call', now(), CASE WHEN $5::boolean THEN NULL ELSE now() END) RETURNING id`,
+            [teamId, senderId, recipientId, body, unread],
+        );
+        const msg = row ? await dmById(row.id) : null;
+        if (msg) io?.to(userRoom(teamId, recipientId)).to(userRoom(teamId, senderId)).emit('dm:message', msg);
+        return;
+    }
+    const row = await Database.queryOne<{ id: string }>(
+        `INSERT INTO chat_messages (user_id, team_id, body, kind) VALUES ($1,$2,$3,'call') RETURNING id`,
+        [senderId, teamId, body],
+    );
+    const msg = row ? await chatById(row.id) : null;
+    if (msg) io?.to(teamRoom(teamId)).emit('chat:message', msg);
 }
 
 export async function markWorkspaceRead(userId: string, teamId: string) {
@@ -152,7 +191,7 @@ export async function sendDirectMessage(who: Who, teamId: string, toId: string, 
             label: `Direct message · ${team?.name ?? ''}`,
             title: who.name,
             body: preview(m),
-            data: { team_id: teamId, from_id: who.id },
+            data: { team_id: teamId, team_name: team?.name ?? '', from_id: who.id },
             groupKey: `dm:${teamId}:${who.id}`,
         });
     })().catch(() => {});

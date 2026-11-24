@@ -49,8 +49,10 @@ async function accessToken(): Promise<string> {
 export type PushPayload = {
     title: string;
     body: string;
-    channel: 'dm' | 'workspace' | 'general';
+    channel: 'dm' | 'workspace' | 'general' | 'call';
     data: Record<string, string>;
+    /** how long Google may hold the push; a ringing call is worthless after ~30 seconds */
+    ttlSeconds?: number;
 };
 
 /** Send one push to every phone this person has signed in on. Dead tokens are forgotten. */
@@ -69,7 +71,7 @@ export async function sendPush(userId: string, p: PushPayload) {
                         token,
                         // data only: the app draws the notification itself, so it can group and label it
                         data: { ...p.data, title: p.title, body: p.body, channel: p.channel },
-                        android: { priority: 'HIGH' },
+                        android: { priority: 'HIGH', ...(p.ttlSeconds ? { ttl: `${p.ttlSeconds}s` } : {}) },
                     },
                 }),
             });
