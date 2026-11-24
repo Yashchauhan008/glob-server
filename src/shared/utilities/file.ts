@@ -6,7 +6,13 @@ import ServerError from '@/shared/utilities/server-error.class.js';
 import sharp from 'sharp';
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
-const TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', ico: 'image/x-icon', tiff: 'image/tiff', pdf: 'application/pdf' };
+const TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', ico: 'image/x-icon', tiff: 'image/tiff', pdf: 'application/pdf',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', weba: 'audio/webm', amr: 'audio/amr',
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp', mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+    doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    txt: 'text/plain', csv: 'text/csv', json: 'application/json', zip: 'application/zip' };
 const typeOf = (file: string) => TYPES[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream';
 const fileStoragePath = env.FILE_STORAGE_PATH;
 

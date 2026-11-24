@@ -30,6 +30,11 @@ router.get('/', withDatabase(async (req, res, _n, db) => {
             (SELECT count(*)::int FROM leads l
               WHERE l.team_id = $3 AND l.next_follow_up_at IS NOT NULL AND l.next_follow_up_at <= now() AND l.stage NOT IN ('won', 'lost')) AS crm,
             (SELECT count(*)::int FROM products p WHERE p.team_id = $3 AND p.status = 'down') AS products,
+            -- unread personal messages plus unread workspace chat
+            ((SELECT count(*)::int FROM dm_messages d WHERE d.team_id = $3 AND d.recipient_id = $1 AND d.read_at IS NULL)
+             + (SELECT count(*)::int FROM chat_messages c
+                 WHERE c.team_id = $3 AND c.user_id <> $1
+                   AND c.created_at > coalesce((SELECT last_read_at FROM chat_reads r WHERE r.user_id = $1 AND r.team_id = $3), 'epoch'))) AS chat,
             -- what other people did since I last looked at the feed
             (SELECT count(*)::int FROM activities a
               WHERE a.team_id = $3 AND a.actor_id <> $1 AND a.entity_type <> 'auth' AND $2::timestamptz IS NOT NULL AND a.created_at > $2) AS activity`,

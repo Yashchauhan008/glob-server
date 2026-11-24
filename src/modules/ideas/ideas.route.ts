@@ -29,7 +29,7 @@ router.param('id', inTeam('ideas'));
 
 router.get('/', withDatabase(async (req, res, _n, db) => {
     const rows = await db.queryAll(
-        `SELECT i.*, u.name AS owner_name,
+        `SELECT i.*, u.name AS owner_name, u.avatar_url AS owner_avatar,
             (SELECT count(*)::int FROM attachments a WHERE a.entity_type = 'idea' AND a.entity_id = i.id) AS attachments,
             (SELECT coalesce(a.thumb_url, a.url) FROM attachments a WHERE a.entity_type = 'idea' AND a.entity_id = i.id AND (a.kind = 'image' OR a.thumb_url IS NOT NULL) ORDER BY (a.kind = 'image') DESC, a.created_at LIMIT 1) AS cover,
             (SELECT count(*)::int FROM idea_messages m WHERE m.idea_id = i.id AND m.tag = 'problem') AS problems,
@@ -62,7 +62,7 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
 
 router.get('/:id', withDatabase(async (req, res, _n, db) => {
     const idea = await db.queryOne(
-        'SELECT i.*, u.name AS owner_name FROM ideas i JOIN users u ON u.id = i.owner_id WHERE i.id = $1',
+        'SELECT i.*, u.name AS owner_name, u.avatar_url AS owner_avatar FROM ideas i JOIN users u ON u.id = i.owner_id WHERE i.id = $1',
         [req.params.id as string],
     );
     if (!idea) return notFound(res);
@@ -107,7 +107,7 @@ router.delete('/:id', withDatabase(async (req, res, _n, db) => {
 }));
 
 const MESSAGE_SQL = `SELECT m.id, m.idea_id, m.owner_id, m.body, m.tag, m.parent_id, m.marked_at, m.created_at,
-        u.name AS owner_name, mu.name AS marked_by_name
+        u.name AS owner_name, u.avatar_url AS owner_avatar, mu.name AS marked_by_name
     FROM idea_messages m JOIN users u ON u.id = m.owner_id LEFT JOIN users mu ON mu.id = m.marked_by`;
 
 router.get('/:id/messages', withDatabase(async (req, res, _n, db) => {

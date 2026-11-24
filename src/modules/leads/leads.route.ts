@@ -35,7 +35,7 @@ router.param('id', inTeam('leads'));
 router.get('/', withDatabase(async (req, res, _n, db) => {
     res.json({
         items: await db.queryAll(
-            `SELECT l.*, u.name AS owner_name FROM leads l JOIN users u ON u.id = l.owner_id
+            `SELECT l.*, u.name AS owner_name, u.avatar_url AS owner_avatar FROM leads l JOIN users u ON u.id = l.owner_id
              WHERE l.team_id = $1 ORDER BY l.created_at DESC`,
             [req.team!.id],
         ),

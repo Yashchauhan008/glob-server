@@ -58,3 +58,6 @@ export async function teamsFor(userId: string) {
 /** The call room and the live-connection room of a team, named in one place. */
 export const callRoom = (teamId: string) => `glob-live-${teamId}`;
 export const teamRoom = (teamId: string) => `team:${teamId}`;
+
+/** One person's connections inside one team (their other tabs and phones), for direct messages and receipts. */
+export const userRoom = (teamId: string, userId: string) => `u:${teamId}:${userId}`;

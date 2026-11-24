@@ -22,6 +22,7 @@ import boardRoutes from '@/modules/boards/boards.route.js';
 import teamsRoutes from '@/modules/teams/teams.route.js';
 import { teamScope } from '@/modules/teams/team.scope.js';
 import personalRoutes from '@/modules/personal/personal.route.js';
+import notificationRoutes from '@/modules/notifications/notifications.route.js';
 import { makePinsRouter } from '@/modules/pins/pins.route.js';
 
 const router = Router();
@@ -31,6 +32,7 @@ router.use('/files', fileRoutes);
 
 router.use(authenticate);
 router.get('/me', (req, res) => res.json({ user: req.user }));
+router.use('/notifications', notificationRoutes); // what needs my attention, across every workspace; also push tokens
 router.use('/personal', personalRoutes); // your own space: ideas, tasks and map pins that belong to no team
 router.use('/teams', teamsRoutes); // which teams can I open? (the admin also creates them here)
 

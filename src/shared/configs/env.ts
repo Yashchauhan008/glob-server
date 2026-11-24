@@ -43,6 +43,9 @@ const envSchema = z.object({
     LIVEKIT_API_KEY: z.string().optional(),
     LIVEKIT_API_SECRET: z.string().optional(),
 
+    // Push notifications (Firebase Cloud Messaging). Paste the service-account JSON (or its base64). Optional.
+    FCM_SERVICE_ACCOUNT: z.string().optional(),
+
     // SMTP
     SMTP_HOST: z.string(),
     SMTP_PORT: z.coerce.number().int().positive().max(65535),

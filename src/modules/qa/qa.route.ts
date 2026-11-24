@@ -1,3 +1,4 @@
+import { notifyUser } from '@/modules/notifications/notify.service.js';
 import { Router } from 'express';
 import z from 'zod';
 import withDatabase from '@/shared/utilities/with-database.js';
@@ -17,7 +18,7 @@ router.param('id', inTeam('questions'));
 router.get('/', withDatabase(async (req, res, _n, db) => {
     res.json({
         items: await db.queryAll(
-            `SELECT q.*, u.name AS owner_name, i.title AS idea_title,
+            `SELECT q.*, u.name AS owner_name, u.avatar_url AS owner_avatar, i.title AS idea_title,
                 (SELECT count(*)::int FROM answers a WHERE a.question_id = q.id) AS answers_count
              FROM questions q JOIN users u ON u.id = q.owner_id LEFT JOIN ideas i ON i.id = q.idea_id
              WHERE q.team_id = $1
@@ -38,12 +39,12 @@ router.post('/', withDatabase(async (req, res, _n, db) => {
 
 router.get('/:id', withDatabase(async (req, res, _n, db) => {
     const q = await db.queryOne(
-        'SELECT q.*, u.name AS owner_name FROM questions q JOIN users u ON u.id = q.owner_id WHERE q.id = $1',
+        'SELECT q.*, u.name AS owner_name, u.avatar_url AS owner_avatar FROM questions q JOIN users u ON u.id = q.owner_id WHERE q.id = $1',
         [req.params.id as string],
     );
     if (!q) return notFound(res);
     const answers = await db.queryAll(
-        `SELECT a.*, u.name AS owner_name FROM answers a JOIN users u ON u.id = a.owner_id
+        `SELECT a.*, u.name AS owner_name, u.avatar_url AS owner_avatar FROM answers a JOIN users u ON u.id = a.owner_id
          WHERE a.question_id = $1 ORDER BY a.created_at`,
         [req.params.id as string],
     );
@@ -52,10 +53,19 @@ router.get('/:id', withDatabase(async (req, res, _n, db) => {
 
 router.post('/:id/answers', withDatabase(async (req, res, _n, db) => {
     const b = validate(aBody, req.body);
-    res.status(201).json(await db.queryOne(
+    const answer = await db.queryOne(
         'INSERT INTO answers (question_id, owner_id, body) VALUES ($1,$2,$3) RETURNING *',
         [req.params.id as string, req.user!.id, b.body],
-    ));
+    );
+    res.status(201).json(answer);
+    // tell the person who asked
+    const q = await db.queryOne<{ owner_id: string; title: string }>('SELECT owner_id, title FROM questions WHERE id = $1', [req.params.id as string]);
+    const me = await db.queryOne<{ name: string }>('SELECT name FROM users WHERE id = $1', [req.user!.id]);
+    if (q && q.owner_id !== req.user!.id)
+        void notifyUser(q.owner_id, {
+            teamId: req.team!.id, type: 'answer', label: 'Question answered', title: `${me?.name ?? 'Someone'} answered`,
+            body: q.title.slice(0, 140), data: { team_id: req.team!.id, question_id: req.params.id as string },
+        }).catch(() => {});
 }));
 
 router.post('/:id/accept/:answerId', withDatabase(async (req, res, _n, db) => {

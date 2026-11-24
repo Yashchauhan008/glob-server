@@ -4,7 +4,7 @@ import Database from '@/shared/helpers/database.helper.js';
 import { Socket } from 'socket.io';
 import { TOKEN_TYPES } from '../auth.constant.js';
 import { accessFor } from '@/modules/access/access.service.js';
-import { roleIn, teamRoom } from '@/modules/teams/team.service.js';
+import { roleIn, teamRoom, userRoom } from '@/modules/teams/team.service.js';
 
 export default async function validateUserSocketHandShake(
     socket: Socket,
@@ -38,6 +38,7 @@ export default async function validateUserSocketHandShake(
         socket.data.team = { id: teamId };
         socket.join(user.id);
         socket.join(teamRoom(teamId));
+        socket.join(userRoom(teamId, user.id));
 
         next();
     } catch (error) {
