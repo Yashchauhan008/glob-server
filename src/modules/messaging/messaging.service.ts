@@ -15,6 +15,7 @@ const messageInput = z.object({
     mime: z.string().max(120).nullish(),
     duration_ms: z.number().int().min(0).max(3_600_000).nullish(),
     client_id: z.string().max(64).nullish(),
+    reply_to_id: z.string().uuid().nullish(),
 });
 export type MessageInput = z.infer<typeof messageInput>;
 
@@ -65,10 +66,19 @@ export function preview(m: { kind: string; body: string; file_name?: string | nu
     }
 }
 
-const CHAT_COLS = `m.id, m.user_id, u.name, u.avatar_url, m.body, m.kind, m.file_url, m.file_name, m.mime, m.duration_ms, m.client_id, m.created_at`;
+const reactionsOf = `(SELECT coalesce(json_agg(json_build_object('user_id', r.user_id, 'emoji', r.emoji) ORDER BY r.created_at), '[]'::json)
+    FROM message_reactions r WHERE r.message_id = m.id) AS reactions`;
+const replyOf = (table: 'chat_messages' | 'dm_messages', sender: 'user_id' | 'sender_id') =>
+    `(SELECT json_build_object('id', p.id, 'user_id', p.${sender}, 'name', pu.name, 'body', p.body, 'kind', p.kind,
+                               'file_name', p.file_name, 'duration_ms', p.duration_ms)
+      FROM ${table} p JOIN users pu ON pu.id = p.${sender} WHERE p.id = m.reply_to_id) AS reply`;
+
+const CHAT_COLS = `m.id, m.user_id, u.name, u.avatar_url, m.body, m.kind, m.file_url, m.file_name, m.mime, m.duration_ms, m.client_id, m.created_at,
+    m.reply_to_id, ${replyOf('chat_messages', 'user_id')}, ${reactionsOf}`;
 const DM_COLS = `m.id, m.team_id, m.sender_id, m.recipient_id, u.name AS sender_name, u.avatar_url AS sender_avatar,
     m.body, m.kind, m.file_url, m.file_name, m.mime, m.duration_ms, m.client_id, m.created_at, m.delivered_at, m.read_at,
-    CASE WHEN m.read_at IS NOT NULL THEN 'read' WHEN m.delivered_at IS NOT NULL THEN 'delivered' ELSE 'sent' END AS status`;
+    CASE WHEN m.read_at IS NOT NULL THEN 'read' WHEN m.delivered_at IS NOT NULL THEN 'delivered' ELSE 'sent' END AS status,
+    m.reply_to_id, ${replyOf('dm_messages', 'sender_id')}, ${reactionsOf}`;
 
 const chatById = (id: string) =>
     Database.queryOne(`SELECT ${CHAT_COLS} FROM chat_messages m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [id]);
@@ -81,12 +91,14 @@ type Who = { id: string; name: string };
 
 export async function sendWorkspaceMessage(who: Who, teamId: string, raw: unknown) {
     const m = parseInput(raw);
+    if (m.reply_to_id && !(await Database.queryOne('SELECT 1 FROM chat_messages WHERE id = $1 AND team_id = $2', [m.reply_to_id, teamId])))
+        m.reply_to_id = null; // the original is gone or belongs to another chat: send it as a normal message
     const row = await Database.queryOne<{ id: string }>(
-        `INSERT INTO chat_messages (user_id, team_id, body, kind, file_url, file_name, mime, duration_ms, client_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO chat_messages (user_id, team_id, body, kind, file_url, file_name, mime, duration_ms, client_id, reply_to_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (user_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
          RETURNING id`,
-        [who.id, teamId, m.body, m.kind, m.file_url ?? null, m.file_name ?? null, m.mime ?? null, m.duration_ms ?? null, m.client_id ?? null],
+        [who.id, teamId, m.body, m.kind, m.file_url ?? null, m.file_name ?? null, m.mime ?? null, m.duration_ms ?? null, m.client_id ?? null, m.reply_to_id ?? null],
     );
     if (!row) {
         // the same message sent twice (a retry): answer with the one we already have
@@ -169,12 +181,16 @@ export async function sendDirectMessage(who: Who, teamId: string, toId: string, 
     // delivered = the other person's app is connected right now (the second tick)
     const online = io ? (await io.in(userRoom(teamId, toId)).fetchSockets()).length > 0 : false;
 
+    if (m.reply_to_id && !(await Database.queryOne(
+        `SELECT 1 FROM dm_messages WHERE id = $1 AND team_id = $2
+           AND ((sender_id = $3 AND recipient_id = $4) OR (sender_id = $4 AND recipient_id = $3))`, [m.reply_to_id, teamId, who.id, toId])))
+        m.reply_to_id = null;
     const row = await Database.queryOne<{ id: string }>(
-        `INSERT INTO dm_messages (team_id, sender_id, recipient_id, body, kind, file_url, file_name, mime, duration_ms, client_id, delivered_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $11::boolean THEN now() ELSE NULL END)
+        `INSERT INTO dm_messages (team_id, sender_id, recipient_id, body, kind, file_url, file_name, mime, duration_ms, client_id, delivered_at, reply_to_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $11::boolean THEN now() ELSE NULL END, $12)
          ON CONFLICT (sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
          RETURNING id`,
-        [teamId, who.id, toId, m.body, m.kind, m.file_url ?? null, m.file_name ?? null, m.mime ?? null, m.duration_ms ?? null, m.client_id ?? null, online],
+        [teamId, who.id, toId, m.body, m.kind, m.file_url ?? null, m.file_name ?? null, m.mime ?? null, m.duration_ms ?? null, m.client_id ?? null, online, m.reply_to_id ?? null],
     );
     if (!row) {
         const prev = await Database.queryOne<{ id: string }>('SELECT id FROM dm_messages WHERE sender_id = $1 AND client_id = $2', [who.id, m.client_id ?? null]);
@@ -239,6 +255,66 @@ export async function dmHistory(userId: string, teamId: string, withId: string, 
     );
     const more = rows.length > limit;
     return { items: more ? rows.slice(1) : rows, has_more: more };
+}
+
+// ---------------------------------------------------------------- reactions
+
+/** Anything that is a single emoji-ish token. Not a full emoji check, just stops long text and markup. */
+const emojiOk = (e: string) => e.length > 0 && e.length <= 16 && !/[<>\s]/.test(e);
+
+/**
+ * Sets (or with `emoji` null, removes) this person's reaction. Tapping the same emoji again removes it.
+ * Works for the workspace chat and for personal chats the person is part of.
+ */
+export async function reactToMessage(who: Who, teamId: string, messageId: string, emoji: string | null) {
+    if (emoji !== null && !emojiOk(emoji)) throw new Error('That reaction is not supported');
+    let scope: 'chat' | 'dm' = 'chat';
+    let authorId: string | null = null;
+    let audience: string[] = [];
+    const ws = await Database.queryOne<{ user_id: string; kind: string }>('SELECT user_id, kind FROM chat_messages WHERE id = $1 AND team_id = $2', [messageId, teamId]);
+    if (ws) {
+        if (ws.kind === 'call') throw new Error('You cannot react to this');
+        authorId = ws.user_id;
+    } else {
+        const dm = await Database.queryOne<{ sender_id: string; recipient_id: string; kind: string }>(
+            'SELECT sender_id, recipient_id, kind FROM dm_messages WHERE id = $1 AND team_id = $2 AND (sender_id = $3 OR recipient_id = $3)', [messageId, teamId, who.id]);
+        if (!dm) throw new Error('Message not found');
+        if (dm.kind === 'call') throw new Error('You cannot react to this');
+        scope = 'dm';
+        authorId = dm.sender_id;
+        audience = [dm.sender_id, dm.recipient_id];
+    }
+
+    const current = await Database.queryOne<{ emoji: string }>('SELECT emoji FROM message_reactions WHERE message_id = $1 AND user_id = $2', [messageId, who.id]);
+    const removing = emoji === null || current?.emoji === emoji;
+    if (removing) await Database.query('DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2', [messageId, who.id]);
+    else await Database.query(
+        `INSERT INTO message_reactions (message_id, scope, user_id, emoji) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji, created_at = now()`,
+        [messageId, scope, who.id, emoji]);
+
+    const reactions = await Database.queryAll('SELECT user_id, emoji FROM message_reactions WHERE message_id = $1 ORDER BY created_at', [messageId]);
+    const payload = { id: messageId, scope, reactions };
+    const io = SocketService.io;
+    if (scope === 'chat') io?.to(teamRoom(teamId)).emit('message:reaction', payload);
+    else io?.to(userRoom(teamId, audience[0]!)).to(userRoom(teamId, audience[1]!)).emit('message:reaction', payload);
+
+    // tell the author, like any messaging app does
+    if (!removing && authorId && authorId !== who.id) {
+        void (async () => {
+            const team = await Database.queryOne<{ name: string }>('SELECT name FROM teams WHERE id = $1', [teamId]);
+            await notifyUser(authorId!, {
+                teamId,
+                type: scope === 'dm' ? 'dm' : 'chat',
+                label: scope === 'dm' ? `Direct message · ${team?.name ?? ''}` : `Workspace chat · ${team?.name ?? ''}`,
+                title: who.name,
+                body: `Reacted ${emoji} to your message`,
+                data: { team_id: teamId, team_name: team?.name ?? '', ...(scope === 'dm' ? { from_id: who.id } : {}) },
+                groupKey: scope === 'dm' ? `dm:${teamId}:${who.id}` : `chat:${teamId}`,
+            });
+        })().catch(() => {});
+    }
+    return payload;
 }
 
 // ---------------------------------------------------------------- the inbox

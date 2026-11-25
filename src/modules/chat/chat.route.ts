@@ -8,7 +8,7 @@ import { registerNewFile } from '@/modules/file/file.service.js';
 import { roleIn } from '@/modules/teams/team.service.js';
 import Database from '@/shared/helpers/database.helper.js';
 import {
-    dmHistory, inbox, markDmRead, markWorkspaceRead, sendDirectMessage, sendWorkspaceMessage, workspaceHistory,
+    dmHistory, inbox, markDmRead, reactToMessage, markWorkspaceRead, sendDirectMessage, sendWorkspaceMessage, workspaceHistory,
 } from '@/modules/messaging/messaging.service.js';
 
 const router = Router();
@@ -54,6 +54,14 @@ router.post('/upload', chatUpload.single('file'), withDatabase(async (req, res, 
     else if (ext === 'webm') kind = 'video';
     const file = await registerNewFile(db, { filePath: req.file.path, _status: 'saved' });
     res.status(201).json({ file_id: file.id, url: file.url, name: req.file.originalname, mime, kind, size: req.file.size });
+}));
+
+// ---- reactions: one emoji per person per message; emoji null (or the same one again) takes it back
+router.post('/react', withDatabase(async (req, res) => {
+    const b = validate(z.object({ message_id: z.string().regex(UUID), emoji: z.string().max(16).nullable() }), req.body);
+    try {
+        res.json(await reactToMessage(await who(req.user!.id), req.team!.id, b.message_id, b.emoji));
+    } catch (e) { res.status(400).json({ message: (e as Error).message }); }
 }));
 
 // ---- workspace chat

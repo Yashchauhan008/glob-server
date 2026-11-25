@@ -1,7 +1,7 @@
 import type { Server, Socket } from 'socket.io';
 import { teamRoom, userRoom, roleIn } from '@/modules/teams/team.service.js';
 import {
-    markDeliveredOnConnect, markDmRead, markWorkspaceRead, sendDirectMessage, sendWorkspaceMessage,
+    markDeliveredOnConnect, markDmRead, markWorkspaceRead, reactToMessage, sendDirectMessage, sendWorkspaceMessage,
 } from '@/modules/messaging/messaging.service.js';
 
 type Ack = (r: { ok: boolean; message?: unknown; error?: string }) => void;
@@ -23,6 +23,13 @@ export default function registerChat(io: Server, socket: Socket) {
     });
     socket.on('chat:typing', () => socket.to(teamRoom(teamId)).emit('chat:typing', { user_id: user.id, name: user.name }));
     socket.on('chat:read', () => { markWorkspaceRead(user.id, teamId).catch(() => {}); });
+
+    socket.on('message:react', async (payload: { id?: string; emoji?: string | null }, ack?: Ack) => {
+        try {
+            if (typeof payload?.id !== 'string' || !UUID.test(payload.id)) throw new Error('Message not found');
+            reply(ack, { ok: true, message: await reactToMessage(user, teamId, payload.id, typeof payload.emoji === 'string' ? payload.emoji : null) });
+        } catch (e) { reply(ack, { ok: false, error: (e as Error).message }); }
+    });
 
     // ---- personal chat
     socket.on('dm:send', async (payload: { to?: string } & Record<string, unknown>, ack?: Ack) => {
